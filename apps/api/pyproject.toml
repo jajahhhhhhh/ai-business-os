@@ -2,7 +2,6 @@
 name = "aibos-api"
 version = "0.1.0"
 description = "AI Business OS - core FastAPI service (REST API, auth, business logic)"
-readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
