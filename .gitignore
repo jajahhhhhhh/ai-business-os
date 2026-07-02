@@ -1,0 +1,35 @@
+# Node
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+npm-debug.log*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+dist/
+*.egg-info/
+
+# Env & secrets (SOPS-encrypted files ARE committed; plaintext never)
+.env
+.env.*
+!.env.example
+*.dec
+
+# OS / editor
+.DS_Store
+._*
+.idea/
+.vscode/
+
+# Data
+*.dump
+infra/compose/data/

@@ -1,0 +1,32 @@
+# Caddy 2 — TLS termination + reverse proxy.
+# {$DOMAIN} = localhost in dev (self-signed) or the real domain in prod (auto Let's Encrypt).
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	# API
+	handle_path /api/* {
+		reverse_proxy api:8000
+	}
+
+	# Observability (owner-only; protect further with basic_auth in prod)
+	handle_path /grafana/* {
+		reverse_proxy grafana:3000
+	}
+	handle_path /glitchtip/* {
+		reverse_proxy glitchtip:8080
+	}
+
+	# Dashboard
+	handle {
+		reverse_proxy web:3000
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+}

@@ -1,0 +1,198 @@
+name: aibos
+
+# Profiles:
+#   data — data services only, for host-side app development (make dev)
+#   prod — full stack behind Caddy (make deploy)
+# Every stateful service pins a major version and owns a named volume.
+
+x-restart: &restart
+  restart: unless-stopped
+
+x-logging: &logging
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    <<: [*restart, *logging]
+    profiles: [data, prod]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-osuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-aibos}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    <<: [*restart, *logging]
+    profiles: [data, prod]
+    command: ["redis-server", "--maxmemory", "512mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redis_data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    <<: [*restart, *logging]
+    profiles: [data, prod]
+    volumes:
+      - qdrant_data:/qdrant/storage
+    ports:
+      - "127.0.0.1:6333:6333"
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.11
+    <<: [*restart, *logging]
+    profiles: [data, prod]
+    environment:
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:?set in .env}
+      MEILI_ENV: production
+      MEILI_NO_ANALYTICS: "true"
+    volumes:
+      - meili_data:/meili_data
+    ports:
+      - "127.0.0.1:7700:7700"
+
+  minio:
+    image: minio/minio:RELEASE.2024-11-07T00-52-20Z
+    <<: [*restart, *logging]
+    profiles: [data, prod]
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:?set in .env}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:?set in .env}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  migrate:
+    build: { context: ../../apps/api }
+    profiles: [prod]
+    command: ["alembic", "upgrade", "head"]
+    env_file: .env
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  api:
+    build: { context: ../../apps/api }
+    <<: [*restart, *logging]
+    profiles: [prod]
+    env_file: .env
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+    expose: ["8000"]
+
+  worker:
+    build: { context: ../../apps/api }
+    <<: [*restart, *logging]
+    profiles: [prod]
+    command: ["celery", "-A", "src.worker", "worker", "--loglevel=INFO", "--concurrency=2"]
+    env_file: .env
+    depends_on:
+      redis: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+
+  beat:
+    build: { context: ../../apps/api }
+    <<: [*restart, *logging]
+    profiles: [prod]
+    command: ["celery", "-A", "src.worker", "beat", "--loglevel=INFO"]
+    env_file: .env
+    depends_on:
+      redis: { condition: service_healthy }
+
+  web:
+    build: { context: ../../apps/web }
+    <<: [*restart, *logging]
+    profiles: [prod]
+    environment:
+      NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:-https://api.localhost}
+    expose: ["3000"]
+
+  caddy:
+    image: caddy:2-alpine
+    <<: [*restart, *logging]
+    profiles: [prod]
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    depends_on: [api, web]
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    <<: [*restart, *logging]
+    profiles: [prod]
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prom_data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+
+  grafana:
+    image: grafana/grafana:11.3.1
+    <<: [*restart, *logging]
+    profiles: [prod]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set in .env}
+      GF_SERVER_ROOT_URL: https://${DOMAIN:-localhost}/grafana
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3001:3000"
+
+  glitchtip:
+    image: glitchtip/glitchtip:v4.2
+    <<: [*restart, *logging]
+    profiles: [prod]
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-osuser}:${POSTGRES_PASSWORD}@postgres:5432/glitchtip
+      SECRET_KEY: ${GLITCHTIP_SECRET_KEY:?set in .env}
+      REDIS_URL: redis://redis:6379/2
+      GLITCHTIP_DOMAIN: https://${DOMAIN:-localhost}/glitchtip
+    depends_on:
+      postgres: { condition: service_healthy }
+    ports:
+      - "127.0.0.1:8001:8080"
+
+volumes:
+  pg_data:
+  redis_data:
+  qdrant_data:
+  meili_data:
+  minio_data:
+  caddy_data:
+  caddy_config:
+  prom_data:
+  grafana_data:
