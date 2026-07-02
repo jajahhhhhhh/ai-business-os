@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { AlertTriangle, Banknote, Radar, UserPlus, Wallet } from "lucide-react";
+import { AlertTriangle, Banknote, Landmark, Radar, UserPlus, Wallet } from "lucide-react";
 import { BarList } from "@/components/BarList";
 import { Donut } from "@/components/Donut";
 import { EmptyState } from "@/components/EmptyState";
@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/Card";
 import {
   getSiteSummary,
   listAgentRuns,
+  listBankTransactions,
   listCompetitorChanges,
   listCompetitors,
   listLeads,
@@ -47,11 +48,12 @@ function inMonth(iso: string, year: number, month: number): boolean {
 }
 
 export default async function OverviewPage() {
-  const [sites, leadsPage, runsPage, competitors] = await Promise.all([
+  const [sites, leadsPage, runsPage, competitors, matchedTransactions] = await Promise.all([
     safe(listSites()),
     safe(listLeads()),
     safe(listAgentRuns()),
     safe(listCompetitors()),
+    safe(listBankTransactions({ status: "matched" })),
   ]);
 
   // API fully unreachable → graceful fallback, never a crash.
@@ -128,13 +130,21 @@ export default async function OverviewPage() {
         ctaLabel="ไปที่งานรีโนเวท"
       />
 
-      <div className="mt-6 grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
+      <div className="mt-6 grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
         <StatCard
           title="ยอดเบิกค้างจ่าย"
           value={formatTHBCompact(outstanding)}
           icon={Banknote}
           hint={`${outstandingCount} งวดรอจ่าย`}
         />
+        <Link href="/payments" className="block" title="ไปที่การเงิน">
+          <StatCard
+            title="รอยืนยันการจ่าย"
+            value={matchedTransactions ? String(matchedTransactions.length) : "—"}
+            icon={Landmark}
+            hint="รายการธนาคารจับคู่แล้ว รอกดยืนยัน"
+          />
+        </Link>
         <StatCard
           title="ใช้ไปเดือนนี้"
           value={formatTHBCompact(spentThisMonth)}

@@ -4,6 +4,12 @@
 {$DOMAIN} {
 	encode zstd gzip
 
+	# Interim protection until Auth.js lands (TD-5, docs/runbooks/gmail-line-setup.md):
+	# uncomment and set a hash from `caddy hash-password` before public exposure.
+	# basic_auth {
+	# 	owner $2a$14$REPLACE_WITH_BCRYPT_HASH
+	# }
+
 	# API
 	handle_path /api/* {
 		reverse_proxy api:8000

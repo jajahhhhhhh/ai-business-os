@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     openai_api_key: str = ""
     line_channel_access_token: str = ""
+    line_owner_user_id: str = ""
+    gmail_client_id: str = ""
+    gmail_client_secret: str = ""
+    gmail_refresh_token: str = ""
 
     def require(self, name: str) -> str:
         """Return the named setting, raising a clear error if it is empty.

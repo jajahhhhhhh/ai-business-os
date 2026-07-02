@@ -104,21 +104,25 @@ async def test_renovation_site_quotation_draw_pay_flow(client: AsyncClient) -> N
     assert exact.status_code == 201, exact.text
     assert exact.json()["seq"] == 2
 
-    # Site summary reflects the paid vs pending split by category.
+    # Site summary reflects the paid vs pending split by category
+    # (response shape mirrors apps/web/lib/types.ts SiteSummary).
     summary = await client.get(f"/v1/renovation/sites/{site_id}/summary")
     assert summary.status_code == 200, summary.text
     body = summary.json()
-    electrical = next(c for c in body["categories"] if c["category"] == "Electrical")
+    electrical = next(c for c in body["spend_by_category"] if c["category"] == "Electrical")
     assert float(electrical["quoted_thb"]) == 100000.0
-    assert float(electrical["paid_thb"]) == 40000.0
-    assert float(electrical["pending_thb"]) == 60000.0
-    assert float(body["total_paid_thb"]) == 40000.0
+    assert float(electrical["spent_thb"]) == 40000.0
+    assert float(body["spent_thb"]) == 40000.0
+    assert float(body["outstanding_draws_thb"]) == 60000.0
+    assert body["site"]["id"] == site_id
+    assert sorted(d["seq"] for d in body["draws"]) == [1, 2]
 
     # The list endpoint carries the same per-site spend summary.
     sites = await client.get("/v1/renovation/sites")
     assert sites.status_code == 200
     listed = next(s for s in sites.json() if s["id"] == site_id)
-    assert float(listed["total_quoted_thb"]) == 100000.0
+    assert float(listed["spend_summary"]["spent_thb"]) == 40000.0
+    assert float(listed["spend_summary"]["outstanding_thb"]) == 60000.0
 
 
 async def test_lead_stage_transition_flow(client: AsyncClient, seeded_lead: uuid.UUID) -> None:

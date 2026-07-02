@@ -31,6 +31,10 @@ class DrawNotPayableError(DrawRuleError):
     """The draw is not in a payable state (already paid or cancelled)."""
 
 
+class BankTransactionRuleError(DomainError):
+    """A bank-transaction state transition the reconciliation rules forbid."""
+
+
 class InvalidStageTransitionError(DomainError):
     """A lead stage transition that the pipeline does not allow."""
 

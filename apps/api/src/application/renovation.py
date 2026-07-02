@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
+from typing import Any
 
 from src.application.errors import NotFoundError
 from src.application.repositories import (
     AuditWriter,
     ContractorRow,
+    DrawDisplayRow,
     DrawRow,
+    MilestoneRow,
     QuotationRow,
     RenovationRepository,
     SiteRow,
@@ -156,12 +160,14 @@ class RenovationUseCases:
         )
         return draw
 
-    async def pay_draw(self, draw_id: uuid.UUID, actor: str) -> DrawRow:
+    async def pay_draw(
+        self, draw_id: uuid.UUID, actor: str, paid_at: datetime | None = None
+    ) -> DrawRow:
         draw = await self._repo.get_draw(draw_id)
         if draw is None:
             raise NotFoundError("draw", draw_id)
         validate_payment(DrawStatus(draw.status))
-        paid = await self._repo.mark_draw_paid(draw_id, datetime.now(UTC))
+        paid = await self._repo.mark_draw_paid(draw_id, paid_at or datetime.now(UTC))
         await self._audit.write(
             actor,
             "draw.paid",
@@ -170,3 +176,56 @@ class RenovationUseCases:
             {"status": {"from": DrawStatus.PENDING.value, "to": DrawStatus.PAID.value}},
         )
         return paid
+
+    async def list_quotations(self, site_id: uuid.UUID) -> Sequence[QuotationRow]:
+        if await self._repo.get_site(site_id) is None:
+            raise NotFoundError("site", site_id)
+        return await self._repo.list_quotations(site_id)
+
+    async def list_draws_display(
+        self, site_id: uuid.UUID | None, status: str | None
+    ) -> Sequence[DrawDisplayRow]:
+        return await self._repo.list_draws_display(site_id, status)
+
+    # ------------------------------------------------------------- milestones
+
+    async def list_milestones(self, site_id: uuid.UUID) -> Sequence[MilestoneRow]:
+        if await self._repo.get_site(site_id) is None:
+            raise NotFoundError("site", site_id)
+        return await self._repo.list_milestones(site_id)
+
+    async def create_milestone(
+        self, site_id: uuid.UUID, name: str, planned_date: date | None, actor: str
+    ) -> MilestoneRow:
+        if await self._repo.get_site(site_id) is None:
+            raise NotFoundError("site", site_id)
+        milestone = await self._repo.create_milestone(site_id, name, planned_date)
+        await self._audit.write(
+            actor,
+            "milestone.created",
+            "milestones",
+            milestone.id,
+            {"name": name, "planned_date": planned_date.isoformat() if planned_date else None},
+        )
+        return milestone
+
+    async def update_milestone(
+        self, milestone_id: uuid.UUID, changes: dict[str, Any], actor: str
+    ) -> MilestoneRow:
+        milestone = await self._repo.get_milestone(milestone_id)
+        if milestone is None:
+            raise NotFoundError("milestone", milestone_id)
+        if not changes:
+            return milestone
+        updated = await self._repo.update_milestone(milestone_id, changes)
+        await self._audit.write(
+            actor,
+            "milestone.updated",
+            "milestones",
+            milestone_id,
+            {
+                field: value.isoformat() if isinstance(value, date) else value
+                for field, value in changes.items()
+            },
+        )
+        return updated

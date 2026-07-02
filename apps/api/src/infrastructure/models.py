@@ -1,4 +1,4 @@
-"""SQLAlchemy 2.0 models. Must mirror alembic revision 0001 exactly."""
+"""SQLAlchemy 2.0 models. Must mirror the alembic revision chain (0001-0002) exactly."""
 
 from __future__ import annotations
 
@@ -120,6 +120,33 @@ class Draw(TimestampMixin, Base):
     evidence_document_id: Mapped[uuid.UUID | None] = mapped_column(
         sa.ForeignKey("documents.id", ondelete="SET NULL")
     )
+
+
+class BankTransaction(TimestampMixin, Base):
+    """A bank-alert-sourced account movement (M1 renovation reconciliation)."""
+
+    __tablename__ = "bank_transactions"
+    __table_args__ = (
+        sa.UniqueConstraint("dedup_hash", name="uq_bank_transactions_dedup_hash"),
+        sa.Index("ix_bank_transactions_status", "status"),
+        sa.Index("ix_bank_transactions_occurred_at", "occurred_at"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    occurred_at: Mapped[datetime] = mapped_column(server_default=sa.func.now())
+    amount_thb: Mapped[Decimal]
+    direction: Mapped[str]  # in|out
+    bank: Mapped[str]
+    account_tail: Mapped[str | None]
+    raw_text: Mapped[str]
+    source: Mapped[str] = mapped_column(server_default=sa.text("'manual'"))  # manual|gmail
+    # unmatched|matched|confirmed|ignored
+    status: Mapped[str] = mapped_column(server_default=sa.text("'unmatched'"))
+    matched_draw_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.ForeignKey("draws.id", ondelete="SET NULL")
+    )
+    ambiguous_match: Mapped[bool] = mapped_column(server_default=sa.text("false"))
+    dedup_hash: Mapped[str]
 
 
 class Milestone(TimestampMixin, Base):
@@ -362,6 +389,8 @@ class Report(TimestampMixin, Base):
     period: Mapped[str | None]
     lang: Mapped[str] = mapped_column(server_default=sa.text("'th'"))
     storage_key: Mapped[str | None]
+    # M1: short Thai reports are stored inline; larger artifacts use storage_key.
+    body: Mapped[str | None]
     generated_by_run_id: Mapped[uuid.UUID | None] = mapped_column(
         sa.ForeignKey("agent_runs.id", ondelete="SET NULL")
     )

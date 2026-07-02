@@ -6,7 +6,10 @@
 
 import type {
   AgentRunStatus,
+  BankTransactionDirection,
+  BankTransactionStatus,
   ChangeSeverity,
+  DrawRowStatus,
   DrawStatus,
   LeadKind,
   LeadStage,
@@ -75,6 +78,37 @@ export const DRAW_STATUS_LABELS: Record<DrawStatus, LocalizedText> = {
   rejected: { th: "ตีกลับ", en: "Rejected" },
 };
 
+/** Status vocabulary of GET /v1/renovation/draws (backend domain model). */
+export const DRAW_ROW_STATUS_LABELS: Record<DrawRowStatus, LocalizedText> = {
+  pending: { th: "รอจ่าย", en: "Pending" },
+  paid: { th: "จ่ายแล้ว", en: "Paid" },
+  cancelled: { th: "ยกเลิก", en: "Cancelled" },
+};
+
+const QUOTATION_STATUS_LABELS: Record<string, LocalizedText> = {
+  pending: { th: "รออนุมัติ", en: "Pending" },
+  approved: { th: "อนุมัติแล้ว", en: "Approved" },
+  rejected: { th: "ไม่อนุมัติ", en: "Rejected" },
+};
+
+/** Thai label for a quotation status; falls back to the raw value. */
+export function quotationStatusLabel(status: string, locale: Locale = DEFAULT_LOCALE): string {
+  const entry = QUOTATION_STATUS_LABELS[status.toLowerCase()];
+  return entry ? entry[locale] : status;
+}
+
+export const BANK_TX_STATUS_LABELS: Record<BankTransactionStatus, LocalizedText> = {
+  unmatched: { th: "รอจับคู่", en: "Unmatched" },
+  matched: { th: "จับคู่แล้ว", en: "Matched" },
+  confirmed: { th: "ยืนยันแล้ว", en: "Confirmed" },
+  ignored: { th: "ไม่เกี่ยวข้อง", en: "Ignored" },
+};
+
+export const BANK_TX_DIRECTION_LABELS: Record<BankTransactionDirection, LocalizedText> = {
+  in: { th: "เข้า", en: "In" },
+  out: { th: "ออก", en: "Out" },
+};
+
 export const MILESTONE_STATUS_LABELS: Record<MilestoneStatus, LocalizedText> = {
   planned: { th: "รอเริ่ม", en: "Planned" },
   in_progress: { th: "กำลังทำ", en: "In progress" },
@@ -95,7 +129,8 @@ export const REPORT_KIND_LABELS: Record<ReportKind, LocalizedText> = {
   monthly: { th: "รายเดือน", en: "Monthly" },
 };
 
-const CATEGORY_LABELS: Record<string, LocalizedText> = {
+/** Spend-category slugs → labels; exported for the quotation-form select. */
+export const SPEND_CATEGORY_LABELS: Record<string, LocalizedText> = {
   electrical: { th: "งานไฟฟ้า", en: "Electrical" },
   plumbing: { th: "งานประปา", en: "Plumbing" },
   demolition: { th: "งานรื้อถอน", en: "Demolition" },
@@ -109,6 +144,6 @@ const CATEGORY_LABELS: Record<string, LocalizedText> = {
 
 /** Thai label for a spend category slug; falls back to the raw slug. */
 export function categoryLabel(category: string, locale: Locale = DEFAULT_LOCALE): string {
-  const entry = CATEGORY_LABELS[category.toLowerCase()];
+  const entry = SPEND_CATEGORY_LABELS[category.toLowerCase()];
   return entry ? entry[locale] : category;
 }

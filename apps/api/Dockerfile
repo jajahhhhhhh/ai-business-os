@@ -21,7 +21,9 @@ RUN pip install \
     "pydantic>=2.9" \
     "pydantic-settings>=2.6" \
     "structlog>=24.4" \
-    "prometheus-client>=0.21"
+    "prometheus-client>=0.21" \
+    "celery[redis]>=5.4" \
+    "httpx>=0.27"
 
 COPY src ./src
 COPY alembic ./alembic

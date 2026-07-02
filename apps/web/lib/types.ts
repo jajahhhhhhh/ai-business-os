@@ -76,6 +76,130 @@ export interface SiteSummary {
 }
 
 // ---------------------------------------------------------------------------
+// Phase A — renovation write flows (M1)
+// ---------------------------------------------------------------------------
+
+export interface Contractor {
+  id: string;
+  name: string;
+  contact: string | null;
+  line_id: string | null;
+}
+
+/** POST /v1/renovation/contractors */
+export interface ContractorCreate {
+  name: string;
+  contact?: string;
+  line_id?: string;
+}
+
+/** Backend stores quotation status as a free string (default "pending"). */
+export interface Quotation {
+  id: string;
+  site_id: string;
+  contractor_id: string;
+  category: string;
+  amount_thb: number;
+  status: string;
+}
+
+/** POST /v1/renovation/quotations */
+export interface QuotationCreate {
+  site_id: string;
+  contractor_id: string;
+  category: string;
+  amount_thb: number;
+}
+
+/**
+ * Status vocabulary of GET /v1/renovation/draws (backend domain model).
+ * Note: differs from the legacy `DrawStatus` used by the site-summary payload.
+ */
+export type DrawRowStatus = "pending" | "paid" | "cancelled";
+
+/** GET /v1/renovation/draws — draw rows enriched with quotation/site context. */
+export interface DrawRow {
+  id: string;
+  seq: number;
+  amount_thb: number;
+  status: DrawRowStatus;
+  requested_at: string;
+  paid_at: string | null;
+  quotation_id: string;
+  category: string;
+  contractor_name: string;
+  site_id: string;
+  site_name: string;
+}
+
+export interface DrawListParams {
+  site_id?: string;
+  status?: DrawRowStatus;
+}
+
+/** POST /v1/renovation/draws */
+export interface DrawCreate {
+  quotation_id: string;
+  amount_thb: number;
+}
+
+/** POST /v1/renovation/sites/{siteId}/milestones */
+export interface MilestoneCreate {
+  name: string;
+  planned_date: string;
+}
+
+/** PATCH /v1/renovation/milestones/{id} — all fields optional. */
+export interface MilestonePatch {
+  name?: string;
+  planned_date?: string;
+  actual_date?: string;
+  status?: MilestoneStatus;
+}
+
+// ---------------------------------------------------------------------------
+// Payments — bank alerts & transactions (M1)
+// ---------------------------------------------------------------------------
+
+export type BankTransactionDirection = "in" | "out";
+
+export type BankTransactionStatus = "unmatched" | "matched" | "confirmed" | "ignored";
+
+export interface BankTransaction {
+  id: string;
+  occurred_at: string;
+  amount_thb: number;
+  direction: BankTransactionDirection;
+  bank: string;
+  account_tail: string | null;
+  status: BankTransactionStatus;
+  matched_draw_id: string | null;
+  ambiguous_match: boolean;
+  raw_excerpt: string;
+  created_at: string;
+}
+
+export interface BankTransactionListParams {
+  status?: BankTransactionStatus;
+  limit?: number;
+}
+
+/** POST /v1/renovation/bank-alerts:ingest */
+export interface BankAlertIngest {
+  raw_text: string;
+  source: "manual";
+}
+
+/** POST /v1/reports/daily-snapshot:generate */
+export interface DailySnapshot {
+  id: string;
+  kind: string;
+  lang: string;
+  body: string;
+  line_sent: boolean;
+}
+
+// ---------------------------------------------------------------------------
 // Leads (Phase C schema, ready now)
 // ---------------------------------------------------------------------------
 
@@ -169,6 +293,8 @@ export interface Report {
   storage_key: string;
   generated_at: string;
   sent_at: string | null;
+  /** Inline Thai report body (daily snapshots since M1) — absent on older rows. */
+  body?: string | null;
 }
 
 export interface ReportListParams {

@@ -5,18 +5,21 @@ from __future__ import annotations
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.application.bank_transactions import MATCHED
+from src.application.snapshot import SiteSnapshot
 from src.domain.cursor import Cursor
 from src.domain.draws import DrawStatus
 from src.domain.leads import LeadStage
 from src.infrastructure.models import (
     AgentRun,
+    BankTransaction,
     ChangeEvent,
     Competitor,
     Contractor,
@@ -24,6 +27,7 @@ from src.infrastructure.models import (
     Job,
     Lead,
     LeadEvent,
+    Milestone,
     Quotation,
     Report,
     Site,
@@ -37,6 +41,23 @@ class SpendRowData:
     quoted_thb: Decimal
     paid_thb: Decimal
     pending_thb: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class DrawDisplayData:
+    """One draw enriched with quotation/contractor/site context."""
+
+    id: uuid.UUID
+    seq: int
+    amount_thb: Decimal
+    status: str
+    requested_at: datetime
+    paid_at: datetime | None
+    quotation_id: uuid.UUID
+    category: str
+    contractor_name: str
+    site_id: uuid.UUID
+    site_name: str
 
 
 class RenovationSqlRepository:
@@ -120,6 +141,87 @@ class RenovationSqlRepository:
         await self._session.refresh(draw)
         return draw
 
+    async def list_quotations(self, site_id: uuid.UUID) -> Sequence[Quotation]:
+        stmt = (
+            sa.select(Quotation)
+            .where(Quotation.site_id == site_id, Quotation.deleted_at.is_(None))
+            .order_by(Quotation.created_at)
+        )
+        return (await self._session.execute(stmt)).scalars().all()
+
+    async def list_draws_display(
+        self, site_id: uuid.UUID | None, status: str | None
+    ) -> Sequence[DrawDisplayData]:
+        stmt = (
+            sa.select(
+                Draw.id,
+                Draw.seq,
+                Draw.amount_thb,
+                Draw.status,
+                Draw.requested_at,
+                Draw.paid_at,
+                Draw.quotation_id,
+                Quotation.category,
+                Contractor.name.label("contractor_name"),
+                Site.id.label("site_id"),
+                Site.name.label("site_name"),
+            )
+            .join(Quotation, Draw.quotation_id == Quotation.id)
+            .join(Contractor, Quotation.contractor_id == Contractor.id)
+            .join(Site, Quotation.site_id == Site.id)
+            .where(Quotation.deleted_at.is_(None))
+        )
+        if site_id is not None:
+            stmt = stmt.where(Quotation.site_id == site_id)
+        if status is not None:
+            stmt = stmt.where(Draw.status == status)
+        stmt = stmt.order_by(Draw.requested_at.desc(), Draw.seq.desc())
+        return [
+            DrawDisplayData(
+                id=row.id,
+                seq=row.seq,
+                amount_thb=row.amount_thb,
+                status=row.status,
+                requested_at=row.requested_at,
+                paid_at=row.paid_at,
+                quotation_id=row.quotation_id,
+                category=row.category,
+                contractor_name=row.contractor_name,
+                site_id=row.site_id,
+                site_name=row.site_name,
+            )
+            for row in (await self._session.execute(stmt)).all()
+        ]
+
+    async def list_milestones(self, site_id: uuid.UUID) -> Sequence[Milestone]:
+        stmt = (
+            sa.select(Milestone)
+            .where(Milestone.site_id == site_id)
+            .order_by(Milestone.planned_date.asc().nulls_last(), Milestone.created_at)
+        )
+        return (await self._session.execute(stmt)).scalars().all()
+
+    async def get_milestone(self, milestone_id: uuid.UUID) -> Milestone | None:
+        return await self._session.get(Milestone, milestone_id)
+
+    async def create_milestone(
+        self, site_id: uuid.UUID, name: str, planned_date: date | None
+    ) -> Milestone:
+        return await self._persist(
+            Milestone(site_id=site_id, name=name, planned_date=planned_date)
+        )
+
+    async def update_milestone(
+        self, milestone_id: uuid.UUID, changes: dict[str, Any]
+    ) -> Milestone:
+        milestone = await self._session.get(Milestone, milestone_id)
+        assert milestone is not None  # existence checked by the use case
+        for field, value in changes.items():
+            setattr(milestone, field, value)
+        await self._session.flush()
+        await self._session.refresh(milestone)
+        return milestone
+
     async def spend_rows(self) -> Sequence[SpendRowData]:
         zero = sa.literal(Decimal("0"), sa.Numeric(14, 2))
 
@@ -183,6 +285,188 @@ class RenovationSqlRepository:
             )
             for (site_id, category), values in merged.items()
         ]
+
+
+class BankTransactionSqlRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get(self, tx_id: uuid.UUID) -> BankTransaction | None:
+        return await self._session.get(BankTransaction, tx_id)
+
+    async def get_by_dedup_hash(self, dedup_hash: str) -> BankTransaction | None:
+        stmt = sa.select(BankTransaction).where(BankTransaction.dedup_hash == dedup_hash)
+        return (await self._session.execute(stmt)).scalar_one_or_none()
+
+    async def create(
+        self,
+        *,
+        occurred_at: datetime,
+        amount_thb: Decimal,
+        direction: str,
+        bank: str,
+        account_tail: str | None,
+        raw_text: str,
+        source: str,
+        status: str,
+        matched_draw_id: uuid.UUID | None,
+        ambiguous_match: bool,
+        dedup_hash: str,
+    ) -> BankTransaction:
+        transaction = BankTransaction(
+            occurred_at=occurred_at,
+            amount_thb=amount_thb,
+            direction=direction,
+            bank=bank,
+            account_tail=account_tail,
+            raw_text=raw_text,
+            source=source,
+            status=status,
+            matched_draw_id=matched_draw_id,
+            ambiguous_match=ambiguous_match,
+            dedup_hash=dedup_hash,
+        )
+        self._session.add(transaction)
+        await self._session.flush()
+        await self._session.refresh(transaction)
+        return transaction
+
+    async def list(self, status: str | None, limit: int) -> Sequence[BankTransaction]:
+        stmt = sa.select(BankTransaction)
+        if status:
+            stmt = stmt.where(BankTransaction.status == status)
+        stmt = stmt.order_by(
+            BankTransaction.occurred_at.desc(), BankTransaction.created_at.desc()
+        ).limit(limit)
+        return (await self._session.execute(stmt)).scalars().all()
+
+    async def set_match(
+        self,
+        tx_id: uuid.UUID,
+        *,
+        status: str,
+        matched_draw_id: uuid.UUID | None,
+        ambiguous_match: bool,
+    ) -> BankTransaction:
+        transaction = await self._session.get(BankTransaction, tx_id)
+        assert transaction is not None  # existence checked by the use case
+        transaction.status = status
+        transaction.matched_draw_id = matched_draw_id
+        transaction.ambiguous_match = ambiguous_match
+        await self._session.flush()
+        await self._session.refresh(transaction)
+        return transaction
+
+    async def set_status(self, tx_id: uuid.UUID, status: str) -> BankTransaction:
+        transaction = await self._session.get(BankTransaction, tx_id)
+        assert transaction is not None  # existence checked by the use case
+        transaction.status = status
+        await self._session.flush()
+        await self._session.refresh(transaction)
+        return transaction
+
+    async def list_pending_draws(self) -> Sequence[Draw]:
+        stmt = (
+            sa.select(Draw)
+            .join(Quotation, Draw.quotation_id == Quotation.id)
+            .where(Draw.status == DrawStatus.PENDING.value, Quotation.deleted_at.is_(None))
+            .order_by(Draw.requested_at)
+        )
+        return (await self._session.execute(stmt)).scalars().all()
+
+    async def get_draw(self, draw_id: uuid.UUID) -> Draw | None:
+        return await self._session.get(Draw, draw_id)
+
+
+class SnapshotSqlRepository:
+    """Aggregations behind the daily Thai snapshot (application/snapshot.py)."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def site_snapshots(self, week_start: datetime, today: date) -> list[SiteSnapshot]:
+        zero = sa.literal(Decimal("0"), sa.Numeric(14, 2))
+
+        sites_stmt = sa.select(Site).where(Site.deleted_at.is_(None)).order_by(Site.created_at)
+        sites = (await self._session.execute(sites_stmt)).scalars().all()
+
+        pending_stmt = (
+            sa.select(
+                Quotation.site_id,
+                sa.func.count(Draw.id).label("count"),
+                sa.func.coalesce(sa.func.sum(Draw.amount_thb), zero).label("total"),
+            )
+            .join(Quotation, Draw.quotation_id == Quotation.id)
+            .where(Draw.status == DrawStatus.PENDING.value, Quotation.deleted_at.is_(None))
+            .group_by(Quotation.site_id)
+        )
+        pending = {
+            row.site_id: (row.count, row.total)
+            for row in (await self._session.execute(pending_stmt)).all()
+        }
+
+        paid_stmt = (
+            sa.select(
+                Quotation.site_id,
+                sa.func.coalesce(sa.func.sum(Draw.amount_thb), zero).label("total"),
+            )
+            .join(Quotation, Draw.quotation_id == Quotation.id)
+            .where(
+                Draw.status == DrawStatus.PAID.value,
+                Draw.paid_at >= week_start,
+                Quotation.deleted_at.is_(None),
+            )
+            .group_by(Quotation.site_id)
+        )
+        paid = {
+            row.site_id: row.total for row in (await self._session.execute(paid_stmt)).all()
+        }
+
+        awaiting_stmt = (
+            sa.select(Quotation.site_id, sa.func.count(BankTransaction.id).label("count"))
+            .join(Draw, BankTransaction.matched_draw_id == Draw.id)
+            .join(Quotation, Draw.quotation_id == Quotation.id)
+            .where(BankTransaction.status == MATCHED)
+            .group_by(Quotation.site_id)
+        )
+        awaiting = {
+            row.site_id: row.count
+            for row in (await self._session.execute(awaiting_stmt)).all()
+        }
+
+        overdue_stmt = (
+            sa.select(Milestone.site_id, Milestone.name)
+            .where(
+                Milestone.planned_date.is_not(None),
+                Milestone.planned_date < today,
+                Milestone.status != "done",
+            )
+            .order_by(Milestone.planned_date)
+        )
+        overdue: dict[uuid.UUID, list[str]] = {}
+        for row in (await self._session.execute(overdue_stmt)).all():
+            overdue.setdefault(row.site_id, []).append(row.name)
+
+        return [
+            SiteSnapshot(
+                name=site.name,
+                pending_draw_count=pending.get(site.id, (0, Decimal("0")))[0],
+                pending_draw_total_thb=pending.get(site.id, (0, Decimal("0")))[1],
+                paid_this_week_thb=paid.get(site.id, Decimal("0")),
+                awaiting_confirmation_count=awaiting.get(site.id, 0),
+                overdue_milestones=tuple(overdue.get(site.id, ())),
+            )
+            for site in sites
+        ]
+
+    async def create_report(
+        self, *, kind: str, period: str, lang: str, body: str, sent_at: datetime | None
+    ) -> Report:
+        report = Report(kind=kind, period=period, lang=lang, body=body, sent_at=sent_at)
+        self._session.add(report)
+        await self._session.flush()
+        await self._session.refresh(report)
+        return report
 
 
 class LeadSqlRepository:

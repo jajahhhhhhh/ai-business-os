@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  Banknote,
   BookOpen,
   Bot,
   FileText,
@@ -35,6 +36,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/", th: "ภาพรวม", en: "Overview", icon: LayoutDashboard },
       { href: "/renovation", th: "งานรีโนเวท", en: "Renovation", icon: Hammer },
+      { href: "/payments", th: "การเงิน", en: "Payments", icon: Banknote },
       { href: "/leads", th: "ลูกค้า", en: "Leads", icon: Users },
       { href: "/competitors", th: "คู่แข่ง", en: "Competitors", icon: Radar },
     ],
