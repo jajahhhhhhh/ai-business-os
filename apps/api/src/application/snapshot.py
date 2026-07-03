@@ -17,8 +17,18 @@ from src.application.repositories import AuditWriter, ReportRow
 from src.domain.bank_alerts import BANGKOK_TZ
 
 _THAI_MONTH_ABBREV = (
-    "ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.",
-    "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค.",
+    "ม.ค.",
+    "ก.พ.",
+    "มี.ค.",
+    "เม.ย.",
+    "พ.ค.",
+    "มิ.ย.",
+    "ก.ค.",
+    "ส.ค.",
+    "ก.ย.",
+    "ต.ค.",
+    "พ.ย.",
+    "ธ.ค.",
 )
 _BE_OFFSET = 543
 
@@ -56,9 +66,7 @@ def _top_action(sites: Sequence[SiteSnapshot]) -> str:
         return f"มี milestone เลยกำหนด {overdue} รายการ ควรอัปเดตแผนงาน"
     pending_count = sum(site.pending_draw_count for site in sites)
     if pending_count:
-        pending_total = sum(
-            (site.pending_draw_total_thb for site in sites), Decimal("0")
-        )
+        pending_total = sum((site.pending_draw_total_thb for site in sites), Decimal("0"))
         return f"มียอดเบิกรอจ่าย {pending_count} รายการ รวม {format_baht(pending_total)}"
     return "วันนี้ไม่มีเรื่องเร่งด่วน"
 
@@ -86,9 +94,7 @@ LinePush = Callable[[str], Awaitable[bool]]
 
 
 class SnapshotRepository(Protocol):
-    async def site_snapshots(
-        self, week_start: datetime, today: date
-    ) -> Sequence[SiteSnapshot]: ...
+    async def site_snapshots(self, week_start: datetime, today: date) -> Sequence[SiteSnapshot]: ...
     async def create_report(
         self, *, kind: str, period: str, lang: str, body: str, sent_at: datetime | None
     ) -> ReportRow: ...

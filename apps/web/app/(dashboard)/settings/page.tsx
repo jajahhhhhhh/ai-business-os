@@ -7,38 +7,45 @@ import { PageHeader } from "@/components/PageHeader";
 import { Badge } from "@/components/ui/Badge";
 import type { BadgeVariant } from "@/components/ui/Badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/Card";
-import { listJobs, listSources, safe } from "@/lib/api";
+import { listCompetitors, listJobs, safe } from "@/lib/api";
 import { formatDateTimeTH } from "@/lib/format";
-import { SOURCE_STATUS_LABELS, SOURCE_TYPE_LABELS } from "@/lib/i18n";
-import type { Job, Source, SourceFetchStatus } from "@/lib/types";
+import { SOURCE_TYPE_LABELS, sourceStatusLabel } from "@/lib/i18n";
+import type { CompetitorSource, Job } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = { title: "ตั้งค่า" };
 
-const SOURCE_STATUS_BADGE: Record<SourceFetchStatus, BadgeVariant> = {
-  ok: "green",
-  unchanged: "neutral",
-  changed: "blue",
-  refused: "amber",
-  error: "red",
-};
+/** Badge tone from the collector's last_status (free string, never crashes). */
+function sourceStatusBadge(status: string): BadgeVariant {
+  const slug = status.toLowerCase();
+  if (slug === "changed") return "blue";
+  if (slug === "error" || slug === "blocked" || slug === "refused") return "red";
+  if (slug === "ok") return "green";
+  // baseline / unchanged / unknown values stay neutral.
+  return "neutral";
+}
+
+/** Competitor source flattened with its owner's name for the registry table. */
+interface SourceRow {
+  competitorName: string;
+  source: CompetitorSource;
+}
 
 /**
- * Live sources registry from GET /v1/sources — read-only here; management
- * (add/toggle) lives on the competitors page. Every row shown already passed
- * the ToS compliance gate (compliance.py) at creation time, hence the ✅.
+ * Live sources registry flattened from GET /v1/competitors — read-only here;
+ * management (add/delete) lives on the competitors page. Every row shown
+ * already passed the ToS compliance gate at creation time, hence the ✅.
  */
-const SOURCE_COLUMNS: Column<Source>[] = [
+const SOURCE_COLUMNS: Column<SourceRow>[] = [
   {
-    key: "name",
+    key: "url",
     header: "แหล่งข้อมูล",
-    render: (source) => (
+    render: ({ competitorName, source }) => (
       <div className="min-w-0 max-w-[18rem]">
-        <p className="truncate font-medium text-slate-900">{source.name}</p>
+        <p className="truncate font-medium text-slate-900">{competitorName}</p>
         <p className="mt-0.5 truncate text-xs text-slate-400" title={source.url}>
           {source.url}
-          {source.competitor_name ? ` · ${source.competitor_name}` : ""}
         </p>
       </div>
     ),
@@ -46,12 +53,14 @@ const SOURCE_COLUMNS: Column<Source>[] = [
   {
     key: "type",
     header: "ประเภท",
-    render: (source) => <Badge variant="outline">{SOURCE_TYPE_LABELS[source.type].th}</Badge>,
+    render: ({ source }) => (
+      <Badge variant="outline">{SOURCE_TYPE_LABELS[source.type].th}</Badge>
+    ),
   },
   {
     key: "policy",
     header: "นโยบาย ToS",
-    render: (source) => (
+    render: ({ source }) => (
       <span title={source.tos_policy}>
         <Badge variant="green">✅ อนุญาต</Badge>
       </span>
@@ -59,26 +68,26 @@ const SOURCE_COLUMNS: Column<Source>[] = [
   },
   {
     key: "last_status",
-    header: "ผลการดึงล่าสุด",
-    render: (source) =>
+    header: "ผลการตรวจล่าสุด",
+    render: ({ source }) =>
       source.last_status ? (
         <div>
-          <Badge variant={SOURCE_STATUS_BADGE[source.last_status]}>
-            {SOURCE_STATUS_LABELS[source.last_status].th}
+          <Badge variant={sourceStatusBadge(source.last_status)}>
+            {sourceStatusLabel(source.last_status)}
           </Badge>
           <p className="mt-1 whitespace-nowrap text-xs text-slate-400">
-            {formatDateTimeTH(source.last_fetched_at)}
+            {formatDateTimeTH(source.last_checked_at)}
           </p>
         </div>
       ) : (
-        <Badge variant="outline">ยังไม่เคยดึง</Badge>
+        <Badge variant="outline">ยังไม่เคยตรวจ</Badge>
       ),
   },
   {
     key: "enabled",
     header: "เปิดใช้งาน",
-    render: (source) => (
-      // Read-only visual switch — toggling lives on the competitors page.
+    render: ({ source }) => (
+      // Read-only visual switch — management lives on the competitors page.
       <span
         role="img"
         aria-label={source.enabled ? "เปิดใช้งาน" : "ปิดใช้งาน"}
@@ -92,7 +101,7 @@ const SOURCE_COLUMNS: Column<Source>[] = [
   },
 ];
 
-function SourcesTable({ sources }: { sources: Source[] | null }) {
+function SourcesTable({ sources }: { sources: SourceRow[] | null }) {
   if (!sources) {
     return (
       <p className="py-6 text-center text-sm text-slate-400">
@@ -104,7 +113,7 @@ function SourcesTable({ sources }: { sources: Source[] | null }) {
     <DataTable
       columns={SOURCE_COLUMNS}
       rows={sources}
-      rowKey={(source) => source.id}
+      rowKey={({ source }) => source.id}
       emptyText="ยังไม่มีแหล่งข้อมูลในระบบ — เพิ่มได้ที่หน้าคู่แข่ง"
     />
   );
@@ -155,7 +164,16 @@ function ScheduleList({ jobs }: { jobs: Job[] | null }) {
 }
 
 export default async function SettingsPage() {
-  const [jobs, sources] = await Promise.all([safe(listJobs()), safe(listSources())]);
+  const [jobs, competitors] = await Promise.all([safe(listJobs()), safe(listCompetitors())]);
+
+  const sources: SourceRow[] | null = competitors
+    ? competitors.flatMap((competitor) =>
+        competitor.sources.map((source) => ({
+          competitorName: competitor.name,
+          source,
+        })),
+      )
+    : null;
 
   return (
     <div>

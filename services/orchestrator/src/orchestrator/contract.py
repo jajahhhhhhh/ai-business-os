@@ -12,15 +12,15 @@ from typing import Any, Protocol
 class ModelTier(StrEnum):
     """Cheap by default; expensive only for synthesis (§5.1)."""
 
-    LOW = "low"    # classification, extraction, diff summaries
-    MID = "mid"    # drafting, scoring explanations
+    LOW = "low"  # classification, extraction, diff summaries
+    MID = "mid"  # drafting, scoring explanations
     HIGH = "high"  # reports, strategy, research synthesis
 
 
 class FailurePolicy(StrEnum):
-    RETRY = "retry"        # exponential backoff, max 3
+    RETRY = "retry"  # exponential backoff, max 3
     ESCALATE = "escalate"  # notify owner via LINE with context, park task
-    ABORT = "abort"        # unrecoverable, park immediately
+    ABORT = "abort"  # unrecoverable, park immediately
 
 
 @dataclass(frozen=True, slots=True)

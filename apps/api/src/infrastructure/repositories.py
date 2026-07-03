@@ -128,12 +128,8 @@ class RenovationSqlRepository:
         stmt = sa.select(Draw).where(Draw.quotation_id == quotation_id).order_by(Draw.seq)
         return (await self._session.execute(stmt)).scalars().all()
 
-    async def create_draw(
-        self, quotation_id: uuid.UUID, seq: int, amount_thb: Decimal
-    ) -> Draw:
-        return await self._persist(
-            Draw(quotation_id=quotation_id, seq=seq, amount_thb=amount_thb)
-        )
+    async def create_draw(self, quotation_id: uuid.UUID, seq: int, amount_thb: Decimal) -> Draw:
+        return await self._persist(Draw(quotation_id=quotation_id, seq=seq, amount_thb=amount_thb))
 
     async def get_draw(self, draw_id: uuid.UUID) -> Draw | None:
         return await self._session.get(Draw, draw_id)
@@ -213,13 +209,9 @@ class RenovationSqlRepository:
     async def create_milestone(
         self, site_id: uuid.UUID, name: str, planned_date: date | None
     ) -> Milestone:
-        return await self._persist(
-            Milestone(site_id=site_id, name=name, planned_date=planned_date)
-        )
+        return await self._persist(Milestone(site_id=site_id, name=name, planned_date=planned_date))
 
-    async def update_milestone(
-        self, milestone_id: uuid.UUID, changes: dict[str, Any]
-    ) -> Milestone:
+    async def update_milestone(self, milestone_id: uuid.UUID, changes: dict[str, Any]) -> Milestone:
         milestone = await self._session.get(Milestone, milestone_id)
         assert milestone is not None  # existence checked by the use case
         for field, value in changes.items():
@@ -246,9 +238,7 @@ class RenovationSqlRepository:
                 Quotation.category,
                 sa.func.coalesce(
                     sa.func.sum(
-                        sa.case(
-                            (Draw.status == DrawStatus.PAID.value, Draw.amount_thb), else_=zero
-                        )
+                        sa.case((Draw.status == DrawStatus.PAID.value, Draw.amount_thb), else_=zero)
                     ),
                     zero,
                 ).label("paid"),
@@ -424,9 +414,7 @@ class SnapshotSqlRepository:
             )
             .group_by(Quotation.site_id)
         )
-        paid = {
-            row.site_id: row.total for row in (await self._session.execute(paid_stmt)).all()
-        }
+        paid = {row.site_id: row.total for row in (await self._session.execute(paid_stmt)).all()}
 
         awaiting_stmt = (
             sa.select(Quotation.site_id, sa.func.count(BankTransaction.id).label("count"))
@@ -436,8 +424,7 @@ class SnapshotSqlRepository:
             .group_by(Quotation.site_id)
         )
         awaiting = {
-            row.site_id: row.count
-            for row in (await self._session.execute(awaiting_stmt)).all()
+            row.site_id: row.count for row in (await self._session.execute(awaiting_stmt)).all()
         }
 
         overdue_stmt = (
@@ -506,9 +493,7 @@ class LeadSqlRepository:
         stmt = stmt.order_by(Lead.created_at.desc(), Lead.id.desc()).limit(limit)
         return (await self._session.execute(stmt)).scalars().all()
 
-    async def set_stage(
-        self, lead_id: uuid.UUID, stage: LeadStage, activity_at: datetime
-    ) -> Lead:
+    async def set_stage(self, lead_id: uuid.UUID, stage: LeadStage, activity_at: datetime) -> Lead:
         lead = await self._session.get(Lead, lead_id)
         assert lead is not None  # existence checked by the use case
         lead.stage = stage.value
@@ -538,9 +523,7 @@ class CompetitorSqlRepository:
 
     async def list(self) -> Sequence[Competitor]:
         stmt = (
-            sa.select(Competitor)
-            .where(Competitor.deleted_at.is_(None))
-            .order_by(Competitor.name)
+            sa.select(Competitor).where(Competitor.deleted_at.is_(None)).order_by(Competitor.name)
         )
         return (await self._session.execute(stmt)).scalars().all()
 
@@ -573,6 +556,280 @@ class CompetitorSqlRepository:
             stmt = stmt.where(ChangeEvent.detected_at >= since)
         stmt = stmt.order_by(ChangeEvent.detected_at.desc())
         return (await self._session.execute(stmt)).scalars().all()
+
+    async def update(self, competitor_id: uuid.UUID, changes: dict[str, Any]) -> Competitor:
+        competitor = await self.get(competitor_id)
+        if competitor is None:
+            raise NotFoundError("competitor", competitor_id)
+        for key, value in changes.items():
+            setattr(competitor, key, value)
+        await self._session.flush()
+        await self._session.refresh(competitor)
+        return competitor
+
+
+@dataclass(frozen=True, slots=True)
+class SourceDisplayData:
+    """A source joined with its competitor's name (M3)."""
+
+    id: uuid.UUID
+    name: str
+    type: str
+    url: str | None
+    tos_policy: str
+    rate_limit_per_hr: int
+    enabled: bool
+    competitor_id: uuid.UUID | None
+    competitor_name: str | None
+    last_checked_at: datetime | None
+    last_status: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ChangeEventDisplayData:
+    """A change event joined with its competitor's name (M3)."""
+
+    id: uuid.UUID
+    competitor_id: uuid.UUID
+    competitor_name: str
+    category: str
+    summary: str
+    severity: str
+    detected_at: datetime
+
+
+class CompetitorIntelSqlRepository:
+    """Sources, snapshots and change events for the M3 sweep/report flows."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get_competitor(self, competitor_id: uuid.UUID) -> Competitor | None:
+        stmt = sa.select(Competitor).where(
+            Competitor.id == competitor_id, Competitor.deleted_at.is_(None)
+        )
+        return (await self._session.execute(stmt)).scalar_one_or_none()
+
+    async def create_competitor(
+        self,
+        *,
+        name: str,
+        kind: str | None,
+        website: str | None,
+        listing_urls: dict[str, Any] | None,
+    ) -> Competitor:
+        competitor = Competitor(
+            name=name, kind=kind, website=website, listing_urls_json=listing_urls
+        )
+        self._session.add(competitor)
+        await self._session.flush()
+        await self._session.refresh(competitor)
+        return competitor
+
+    # ------------------------------------------------------------- sources
+
+    async def create_source(
+        self,
+        *,
+        name: str,
+        type: str,  # noqa: A002 - mirrors the column name
+        url: str,
+        competitor_id: uuid.UUID | None,
+        rate_limit_per_hr: int,
+        tos_policy: str,
+        robots_ok: bool,
+        enabled: bool,
+    ) -> Source:
+        source = Source(
+            name=name,
+            type=type,
+            url=url,
+            competitor_id=competitor_id,
+            rate_limit_per_hr=rate_limit_per_hr,
+            tos_policy=tos_policy,
+            robots_ok=robots_ok,
+            enabled=enabled,
+        )
+        self._session.add(source)
+        await self._session.flush()
+        await self._session.refresh(source)
+        return source
+
+    async def get_source(self, source_id: uuid.UUID) -> Source | None:
+        return await self._session.get(Source, source_id)
+
+    async def delete_source(self, source_id: uuid.UUID) -> None:
+        source = await self._session.get(Source, source_id)
+        if source is None:
+            return
+        await self._session.delete(source)
+        await self._session.flush()
+
+    def _display_stmt(self) -> sa.Select:
+        return (
+            sa.select(Source, Competitor.name.label("competitor_name"))
+            .outerjoin(Competitor, Source.competitor_id == Competitor.id)
+            .order_by(Source.created_at.desc(), Source.id.desc())
+        )
+
+    @staticmethod
+    def _to_display(row: sa.Row) -> SourceDisplayData:
+        source: Source = row.Source
+        return SourceDisplayData(
+            id=source.id,
+            name=source.name,
+            type=source.type,
+            url=source.url,
+            tos_policy=source.tos_policy,
+            rate_limit_per_hr=source.rate_limit_per_hr,
+            enabled=source.enabled,
+            competitor_id=source.competitor_id,
+            competitor_name=row.competitor_name,
+            last_checked_at=source.last_checked_at,
+            last_status=source.last_status,
+        )
+
+    async def list_sources(self, competitor_id: uuid.UUID | None) -> list[SourceDisplayData]:
+        stmt = self._display_stmt()
+        if competitor_id is not None:
+            stmt = stmt.where(Source.competitor_id == competitor_id)
+        rows = (await self._session.execute(stmt)).all()
+        return [self._to_display(row) for row in rows]
+
+    async def sweep_sources(self, competitor_id: uuid.UUID | None) -> list[SourceDisplayData]:
+        stmt = self._display_stmt().where(
+            Source.enabled.is_(True),
+            Source.competitor_id.is_not(None),
+            Competitor.active.is_(True),
+            Competitor.deleted_at.is_(None),
+        )
+        if competitor_id is not None:
+            stmt = stmt.where(Source.competitor_id == competitor_id)
+        rows = (await self._session.execute(stmt)).all()
+        return [self._to_display(row) for row in rows]
+
+    async def set_source_result(
+        self, source_id: uuid.UUID, status: str, checked_at: datetime | None
+    ) -> None:
+        source = await self._session.get(Source, source_id)
+        if source is None:  # deleted mid-sweep; nothing to record
+            return
+        source.last_status = status
+        if checked_at is not None:
+            source.last_checked_at = checked_at
+        await self._session.flush()
+
+    # ----------------------------------------------------------- snapshots
+
+    async def latest_snapshot(
+        self, competitor_id: uuid.UUID, source_id: uuid.UUID
+    ) -> Snapshot | None:
+        stmt = (
+            sa.select(Snapshot)
+            .where(Snapshot.competitor_id == competitor_id, Snapshot.source_id == source_id)
+            .order_by(Snapshot.captured_at.desc(), Snapshot.created_at.desc())
+            .limit(1)
+        )
+        return (await self._session.execute(stmt)).scalar_one_or_none()
+
+    async def create_snapshot(
+        self,
+        *,
+        competitor_id: uuid.UUID,
+        source_id: uuid.UUID,
+        content_hash: str,
+        storage_key: str,
+    ) -> Snapshot:
+        snapshot = Snapshot(
+            competitor_id=competitor_id,
+            source_id=source_id,
+            content_hash=content_hash,
+            storage_key=storage_key,
+        )
+        self._session.add(snapshot)
+        await self._session.flush()
+        await self._session.refresh(snapshot)
+        return snapshot
+
+    # ------------------------------------------------------- change events
+
+    async def create_change_event(
+        self,
+        *,
+        competitor_id: uuid.UUID,
+        snapshot_id: uuid.UUID | None,
+        category: str,
+        summary: str,
+        severity: str,
+    ) -> ChangeEvent:
+        event = ChangeEvent(
+            competitor_id=competitor_id,
+            snapshot_id=snapshot_id,
+            category=category,
+            summary=summary,
+            severity=severity,
+        )
+        self._session.add(event)
+        await self._session.flush()
+        await self._session.refresh(event)
+        return event
+
+    async def list_change_events(
+        self,
+        *,
+        severity: str | None,
+        competitor_id: uuid.UUID | None,
+        since: datetime | None,
+        limit: int,
+    ) -> list[ChangeEventDisplayData]:
+        stmt = (
+            sa.select(ChangeEvent, Competitor.name.label("competitor_name"))
+            .join(Competitor, ChangeEvent.competitor_id == Competitor.id)
+            .order_by(ChangeEvent.detected_at.desc(), ChangeEvent.id.desc())
+            .limit(limit)
+        )
+        if severity is not None:
+            stmt = stmt.where(ChangeEvent.severity == severity)
+        if competitor_id is not None:
+            stmt = stmt.where(ChangeEvent.competitor_id == competitor_id)
+        if since is not None:
+            stmt = stmt.where(ChangeEvent.detected_at >= since)
+        rows = (await self._session.execute(stmt)).all()
+        return [self._event_display(row) for row in rows]
+
+    async def change_events_since(self, since: datetime) -> list[ChangeEventDisplayData]:
+        stmt = (
+            sa.select(ChangeEvent, Competitor.name.label("competitor_name"))
+            .join(Competitor, ChangeEvent.competitor_id == Competitor.id)
+            .where(ChangeEvent.detected_at >= since)
+            .order_by(Competitor.name, ChangeEvent.detected_at.desc())
+        )
+        rows = (await self._session.execute(stmt)).all()
+        return [self._event_display(row) for row in rows]
+
+    @staticmethod
+    def _event_display(row: sa.Row) -> ChangeEventDisplayData:
+        event: ChangeEvent = row.ChangeEvent
+        return ChangeEventDisplayData(
+            id=event.id,
+            competitor_id=event.competitor_id,
+            competitor_name=row.competitor_name,
+            category=event.category,
+            summary=event.summary,
+            severity=event.severity,
+            detected_at=event.detected_at,
+        )
+
+    # -------------------------------------------------------------- report
+
+    async def create_report(
+        self, *, kind: str, period: str, lang: str, body: str, sent_at: datetime | None
+    ) -> Report:
+        report = Report(kind=kind, period=period, lang=lang, body=body, sent_at=sent_at)
+        self._session.add(report)
+        await self._session.flush()
+        await self._session.refresh(report)
+        return report
 
 
 class AgentSqlRepository:
@@ -661,9 +918,7 @@ class KnowledgeBaseSqlRepository:
         return document
 
     async def get_document(self, document_id: uuid.UUID) -> Document | None:
-        stmt = sa.select(Document).where(
-            Document.id == document_id, Document.deleted_at.is_(None)
-        )
+        stmt = sa.select(Document).where(Document.id == document_id, Document.deleted_at.is_(None))
         return (await self._session.execute(stmt)).scalar_one_or_none()
 
     async def list_documents(self, status: str | None, limit: int) -> Sequence[Document]:
@@ -673,9 +928,7 @@ class KnowledgeBaseSqlRepository:
         stmt = stmt.order_by(Document.created_at.desc(), Document.id.desc()).limit(limit)
         return (await self._session.execute(stmt)).scalars().all()
 
-    async def update_document(
-        self, document_id: uuid.UUID, changes: dict[str, Any]
-    ) -> Document:
+    async def update_document(self, document_id: uuid.UUID, changes: dict[str, Any]) -> Document:
         document = await self.get_document(document_id)
         if document is None:
             raise NotFoundError("document", document_id)
@@ -705,9 +958,7 @@ class KnowledgeBaseSqlRepository:
         )
 
     async def chunk_count(self, document_id: uuid.UUID) -> int:
-        stmt = sa.select(sa.func.count()).select_from(Chunk).where(
-            Chunk.document_id == document_id
-        )
+        stmt = sa.select(sa.func.count()).select_from(Chunk).where(Chunk.document_id == document_id)
         return int((await self._session.execute(stmt)).scalar_one())
 
     async def get_chunks_with_titles(
@@ -792,9 +1043,9 @@ class MemorySqlRepository:
         )
         if kind:
             stmt = stmt.where(Memory.kind == kind)
-        stmt = stmt.order_by(
-            Memory.importance.desc(), Memory.created_at.desc(), Memory.id
-        ).limit(limit)
+        stmt = stmt.order_by(Memory.importance.desc(), Memory.created_at.desc(), Memory.id).limit(
+            limit
+        )
         return (await self._session.execute(stmt)).scalars().all()
 
     async def get_active_many(
@@ -810,9 +1061,7 @@ class MemorySqlRepository:
         return (await self._session.execute(stmt)).scalars().all()
 
     async def list_expired(self, now: datetime) -> Sequence[Memory]:
-        stmt = sa.select(Memory).where(
-            Memory.expires_at.is_not(None), Memory.expires_at <= now
-        )
+        stmt = sa.select(Memory).where(Memory.expires_at.is_not(None), Memory.expires_at <= now)
         return (await self._session.execute(stmt)).scalars().all()
 
     async def mark_consolidated(

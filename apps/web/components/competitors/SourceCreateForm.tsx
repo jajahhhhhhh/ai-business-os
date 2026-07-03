@@ -3,69 +3,61 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, TriangleAlert } from "lucide-react";
+import { Plus, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { FormError } from "@/components/ui/FormError";
 import { Input, Select } from "@/components/ui/Input";
-import { ApiError, createSource } from "@/lib/api";
+import { ApiError, createCompetitorSource } from "@/lib/api";
 import { SOURCE_TYPE_LABELS } from "@/lib/i18n";
-import type { SourceType } from "@/lib/types";
+import type { CompetitorSourceType } from "@/lib/types";
 
-const TYPE_OPTIONS: SourceType[] = ["website", "rss", "sitemap"];
+const TYPE_OPTIONS: CompetitorSourceType[] = ["website", "rss"];
 
 const NETWORK_ERROR_TH =
   "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ — ตรวจสอบว่า API ทำงานอยู่แล้วลองอีกครั้ง";
 
-/** Serializable competitor option built by the server page. */
-export interface CompetitorOption {
-  id: string;
-  name: string;
-}
-
 /**
- * Inline "เพิ่มแหล่งข้อมูล" form. Does not use useApiAction because a 422
- * needs special treatment: it is the ToS compliance gate rejecting the URL
- * (e.g. facebook.com, airbnb) — shown as an amber policy note, not a generic
- * error.
+ * Inline "เพิ่มแหล่งข้อมูล" mini-form on each competitor card —
+ * POST /v1/competitors/{id}/sources.
+ *
+ * Does not use useApiAction because a 422 needs special treatment: it is the
+ * ToS compliance gate refusing a blocked domain (Facebook / Airbnb / Booking /
+ * Agoda) — its Thai detail is shown as a prominent policy panel.
  */
-export function SourceCreateForm({ competitors }: { competitors: CompetitorOption[] }) {
+export function SourceCreateForm({ competitorId }: { competitorId: string }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /** problem+json detail from the 422 ToS compliance gate. */
-  const [tosDetail, setTosDetail] = useState<string | null>(null);
+  const [blockedDetail, setBlockedDetail] = useState<string | null>(null);
 
-  const [name, setName] = useState("");
-  const [competitorId, setCompetitorId] = useState("");
-  const [type, setType] = useState<SourceType>("website");
+  const [type, setType] = useState<CompetitorSourceType>("website");
   const [url, setUrl] = useState("");
+
+  function handleTypeChange(value: string) {
+    // The select only offers TYPE_OPTIONS values — validate instead of casting.
+    const match = TYPE_OPTIONS.find((option) => option === value);
+    if (match) setType(match);
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const trimmedName = name.trim();
     const trimmedUrl = url.trim();
-    if (trimmedName === "" || trimmedUrl === "") return;
+    if (trimmedUrl === "") return;
 
     setPending(true);
     setError(null);
-    setTosDetail(null);
+    setBlockedDetail(null);
     try {
-      await createSource({
-        name: trimmedName,
-        type,
-        url: trimmedUrl,
-        ...(competitorId !== "" ? { competitor_id: competitorId } : {}),
-      });
+      await createCompetitorSource(competitorId, { type, url: trimmedUrl });
       router.refresh();
-      setName("");
       setUrl("");
-      setCompetitorId("");
       setType("website");
       setOpen(false);
     } catch (err) {
       if (err instanceof ApiError && err.status === 422) {
-        setTosDetail(err.message);
+        setBlockedDetail(err.message);
       } else {
         setError(err instanceof ApiError ? err.message : NETWORK_ERROR_TH);
       }
@@ -77,104 +69,66 @@ export function SourceCreateForm({ competitors }: { competitors: CompetitorOptio
   if (!open) {
     return (
       <Button
-        variant="outline"
-        className="px-3 py-1.5 text-xs"
+        variant="ghost"
+        className="px-2 py-1 text-xs"
         onClick={() => {
           setError(null);
-          setTosDetail(null);
+          setBlockedDetail(null);
           setOpen(true);
         }}
       >
-        <Plus size={14} />
+        <Plus size={13} />
         เพิ่มแหล่งข้อมูล
       </Button>
     );
   }
 
-  function handleTypeChange(value: string) {
-    // The select only offers TYPE_OPTIONS values — validate instead of casting.
-    const match = TYPE_OPTIONS.find((option) => option === value);
-    if (match) setType(match);
-  }
-
   return (
     <form
       onSubmit={handleSubmit}
-      className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/60 p-4"
+      className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/60 p-3"
     >
-      <p className="text-sm font-medium text-slate-800">เพิ่มแหล่งข้อมูล</p>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <label className="block text-xs font-medium text-slate-500">
-          ชื่อแหล่งข้อมูล
-          <Input
-            required
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            placeholder="เช่น เว็บไซต์หลัก Villa Sunset"
-            className="mt-1 w-full"
-          />
-        </label>
-        <label className="block text-xs font-medium text-slate-500">
-          คู่แข่ง
-          <Select
-            value={competitorId}
-            onChange={(event) => setCompetitorId(event.target.value)}
-            className="mt-1 w-full"
-          >
-            <option value="">ไม่ระบุ (แหล่งข้อมูลรวม)</option>
-            {competitors.map((competitor) => (
-              <option key={competitor.id} value={competitor.id}>
-                {competitor.name}
-              </option>
-            ))}
-          </Select>
-        </label>
-        <label className="block text-xs font-medium text-slate-500">
-          ประเภท
-          <Select
-            required
-            value={type}
-            onChange={(event) => handleTypeChange(event.target.value)}
-            className="mt-1 w-full"
-          >
-            {TYPE_OPTIONS.map((option) => (
-              <option key={option} value={option}>
-                {SOURCE_TYPE_LABELS[option].th}
-              </option>
-            ))}
-          </Select>
-        </label>
-        <label className="block text-xs font-medium text-slate-500">
-          URL
-          <Input
-            required
-            type="url"
-            value={url}
-            onChange={(event) => setUrl(event.target.value)}
-            placeholder="https://..."
-            className="mt-1 w-full"
-          />
-        </label>
+      <div className="flex flex-wrap gap-2">
+        <Select
+          aria-label="ประเภทแหล่งข้อมูล"
+          value={type}
+          onChange={(event) => handleTypeChange(event.target.value)}
+          className="w-28 px-2 py-1.5 text-xs"
+        >
+          {TYPE_OPTIONS.map((option) => (
+            <option key={option} value={option}>
+              {SOURCE_TYPE_LABELS[option].th}
+            </option>
+          ))}
+        </Select>
+        <Input
+          required
+          type="url"
+          aria-label="URL แหล่งข้อมูล"
+          value={url}
+          onChange={(event) => setUrl(event.target.value)}
+          placeholder="https://..."
+          className="min-w-0 flex-1 px-2 py-1.5 text-xs"
+        />
       </div>
 
-      {tosDetail && (
-        <p
+      {blockedDetail && (
+        <div
           role="alert"
-          className="flex items-start gap-2 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800"
+          className="flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2"
         >
-          <TriangleAlert size={14} className="mt-0.5 shrink-0" />
-          <span>
-            <span className="font-semibold">แหล่งข้อมูลนี้ไม่ผ่านนโยบาย ToS</span>
-            {" — "}
-            {tosDetail}
-          </span>
-        </p>
+          <ShieldAlert size={14} className="mt-0.5 shrink-0 text-amber-600" />
+          <div className="text-xs text-amber-900">
+            <p className="font-semibold">แหล่งข้อมูลนี้ถูกปิดกั้นตามนโยบาย</p>
+            <p className="mt-0.5 leading-relaxed">{blockedDetail}</p>
+          </div>
+        </div>
       )}
       <FormError error={error} />
 
       <div className="flex gap-2">
         <Button type="submit" disabled={pending} className="px-3 py-1.5 text-xs">
-          {pending ? "กำลังบันทึก..." : "บันทึกแหล่งข้อมูล"}
+          {pending ? "กำลังบันทึก..." : "บันทึก"}
         </Button>
         <Button
           variant="ghost"

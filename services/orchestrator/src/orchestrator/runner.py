@@ -21,7 +21,7 @@ class RunStatus(StrEnum):
     RUNNING = "running"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
-    PARKED = "parked"       # escalated to owner, awaiting decision
+    PARKED = "parked"  # escalated to owner, awaiting decision
     OVER_BUDGET = "over_budget"
 
 

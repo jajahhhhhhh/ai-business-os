@@ -91,9 +91,7 @@ class TestPipeline:
         assert chunk.qdrant_point_id == str(chunk.id)
 
     async def test_embedder_unavailable_still_indexes_keyword(self) -> None:
-        use_cases, repo, keyword, vector = make_use_cases(
-            embedder=FakeEmbedder(available=False)
-        )
+        use_cases, repo, keyword, vector = make_use_cases(embedder=FakeEmbedder(available=False))
         document = await ingest_and_process(use_cases, THAI_TEXT, "quote")
         assert document.status == "indexed"
         assert document.meili_indexed is True

@@ -1,4 +1,6 @@
 # syntax=docker/dockerfile:1
+# Build context is the REPO ROOT (compose: context ../.., dockerfile apps/api/Dockerfile)
+# so the image can install the shared services/collectors package (M3 sweep).
 
 # ---------------------------------------------------------------- deps + app
 FROM python:3.12-slim AS builder
@@ -11,7 +13,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 # Runtime dependencies pinned in lockstep with pyproject.toml [project.dependencies].
 # Listed explicitly so this layer stays cached until the dep set actually changes.
-COPY pyproject.toml ./
+COPY apps/api/pyproject.toml ./
 RUN pip install \
     "fastapi>=0.115" \
     "uvicorn[standard]>=0.30" \
@@ -39,9 +41,13 @@ RUN pip install \
 ARG INSTALL_ML=true
 RUN if [ "$INSTALL_ML" = "true" ]; then pip install "sentence-transformers>=3.2"; fi
 
-COPY src ./src
-COPY alembic ./alembic
-COPY alembic.ini ./
+# Shared compliance-gated collectors library (§8.4) — used by the M3 sweep.
+COPY services/collectors /tmp/collectors
+RUN pip install /tmp/collectors && rm -rf /tmp/collectors
+
+COPY apps/api/src ./src
+COPY apps/api/alembic ./alembic
+COPY apps/api/alembic.ini ./
 
 # ---------------------------------------------------------------- runtime
 FROM python:3.12-slim

@@ -51,6 +51,6 @@ class ModelRouter:
 
     @staticmethod
     def estimate_cost(spec: ModelSpec, tokens_in: int, tokens_out: int) -> Decimal:
-        return (
-            spec.usd_per_mtok_in * tokens_in + spec.usd_per_mtok_out * tokens_out
-        ) / Decimal(1_000_000)
+        return (spec.usd_per_mtok_in * tokens_in + spec.usd_per_mtok_out * tokens_out) / Decimal(
+            1_000_000
+        )

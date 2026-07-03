@@ -14,7 +14,7 @@ import {
   getSiteSummary,
   listAgentRuns,
   listBankTransactions,
-  listChangeEvents,
+  listCompetitorChanges,
   listLeads,
   listSites,
   safe,
@@ -56,7 +56,7 @@ export default async function OverviewPage() {
     safe(listSites()),
     safe(listLeads()),
     safe(listAgentRuns()),
-    safe(listChangeEvents({ since: sevenDaysAgoIso(), limit: 50 })),
+    safe(listCompetitorChanges({ since: sevenDaysAgoIso(), limit: 50 })),
     safe(listBankTransactions({ status: "matched" })),
   ]);
 
@@ -76,7 +76,7 @@ export default async function OverviewPage() {
       )
     : [];
 
-  // Global change-events endpoint (7-day window), no per-competitor fan-out.
+  // Global change feed (GET /v1/competitors/changes, 7-day window), no per-competitor fan-out.
   const changeCount = changeEvents
     ? {
         total: changeEvents.length,

@@ -50,9 +50,7 @@ class Money:
 
     def _same_currency(self, other: Money) -> None:
         if self.currency != other.currency:
-            raise CurrencyMismatchError(
-                f"Cannot combine {self.currency} with {other.currency}"
-            )
+            raise CurrencyMismatchError(f"Cannot combine {self.currency} with {other.currency}")
 
     def __add__(self, other: Money) -> Money:
         self._same_currency(other)

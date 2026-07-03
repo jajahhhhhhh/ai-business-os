@@ -13,11 +13,14 @@ import type {
   BankAlertIngest,
   BankTransaction,
   BankTransactionListParams,
-  ChangeEventListParams,
-  ChangeEventRow,
+  CheckResponse,
   Competitor,
+  CompetitorChange,
+  CompetitorChangeListParams,
   CompetitorCreate,
   CompetitorPatch,
+  CompetitorSource,
+  CompetitorSourceCreate,
   Contractor,
   ContractorCreate,
   DailySnapshot,
@@ -44,10 +47,6 @@ import type {
   ReportListParams,
   Site,
   SiteSummary,
-  Source,
-  SourceCreate,
-  SourceListParams,
-  SweepResponse,
   WeeklyCompetitorReport,
 } from "./types";
 
@@ -165,6 +164,25 @@ async function mutate<T>(
 }
 
 /**
+ * DELETE for `use client` components — expects 204 No Content, so the body is
+ * never parsed. Throws `ApiError` with the problem+json detail on failure.
+ */
+async function remove(path: string): Promise<void> {
+  const url = new URL(`/v1${path}`, apiBaseUrl());
+
+  const res = await fetch(url.toString(), {
+    method: "DELETE",
+    cache: "no-store",
+    headers: { Accept: "application/json" },
+    signal: AbortSignal.timeout(MUTATION_TIMEOUT_MS),
+  });
+
+  if (!res.ok) {
+    throw new ApiError(res.status, await problemDetail(res));
+  }
+}
+
+/**
  * Multipart upload (POST FormData) for `use client` components. Throws
  * `ApiError` with the problem+json detail, same as `mutate`.
  *
@@ -223,6 +241,7 @@ export function listLeads(params: LeadListParams = {}): Promise<Paginated<Lead>>
   });
 }
 
+/** GET /v1/competitors — each competitor carries its nested sources. */
 export function listCompetitors(): Promise<Competitor[]> {
   return get<Competitor[]>("/competitors");
 }
@@ -391,24 +410,18 @@ export function uploadKbDocument(payload: KbDocumentUpload): Promise<KbDocument>
 }
 
 // ---------------------------------------------------------------------------
-// Competitor intelligence (M3) — reads for server components + client filters
+// Competitor intelligence (M3) — reads for server components
 // ---------------------------------------------------------------------------
 
-/** GET /v1/change-events — newest first. */
-export function listChangeEvents(
-  params: ChangeEventListParams = {},
-): Promise<ChangeEventRow[]> {
-  return get<ChangeEventRow[]>("/change-events", {
-    severity: params.severity,
-    competitor_id: params.competitor_id,
+/** GET /v1/competitors/changes — global change feed, newest first. */
+export function listCompetitorChanges(
+  params: CompetitorChangeListParams = {},
+): Promise<CompetitorChange[]> {
+  return get<CompetitorChange[]>("/competitors/changes", {
     since: params.since,
+    severity: params.severity,
     limit: params.limit,
   });
-}
-
-/** GET /v1/sources — optionally scoped to one competitor. */
-export function listSources(params: SourceListParams = {}): Promise<Source[]> {
-  return get<Source[]>("/sources", { competitor_id: params.competitor_id });
 }
 
 // ---------------------------------------------------------------------------
@@ -416,6 +429,11 @@ export function listSources(params: SourceListParams = {}): Promise<Source[]> {
 // All throw ApiError with a display-ready problem+json detail.
 // ---------------------------------------------------------------------------
 
+/**
+ * POST /v1/competitors → 201. A 422 ApiError carries the ToS compliance-gate
+ * detail (Thai) when a source URL is Facebook/Airbnb/Booking/Agoda — the form
+ * renders it as a prominent policy panel, not a generic error.
+ */
 export function createCompetitor(payload: CompetitorCreate): Promise<Competitor> {
   return mutate<Competitor>("POST", "/competitors", payload);
 }
@@ -428,20 +446,33 @@ export function updateCompetitor(
 }
 
 /**
- * POST /v1/sources — 422 ApiError carries the ToS compliance-gate detail,
- * rendered inline by the source form (amber note, not a generic error).
+ * POST /v1/competitors/{id}/sources → 201. Same 422 ToS compliance gate as
+ * createCompetitor (blocked domains rejected with a Thai detail).
  */
-export function createSource(payload: SourceCreate): Promise<Source> {
-  return mutate<Source>("POST", "/sources", payload);
+export function createCompetitorSource(
+  competitorId: string,
+  payload: CompetitorSourceCreate,
+): Promise<CompetitorSource> {
+  return mutate<CompetitorSource>(
+    "POST",
+    `/competitors/${encodeURIComponent(competitorId)}/sources`,
+    payload,
+  );
 }
 
-export function updateSourceEnabled(id: string, enabled: boolean): Promise<Source> {
-  return mutate<Source>("PATCH", `/sources/${encodeURIComponent(id)}`, { enabled });
+/** DELETE /v1/competitors/{id}/sources/{sourceId} → 204. */
+export function deleteCompetitorSource(
+  competitorId: string,
+  sourceId: string,
+): Promise<void> {
+  return remove(
+    `/competitors/${encodeURIComponent(competitorId)}/sources/${encodeURIComponent(sourceId)}`,
+  );
 }
 
-/** POST /v1/competitors/{id}:sweep → 202 { dispatched, detail }. */
-export function sweepCompetitor(id: string): Promise<SweepResponse> {
-  return mutate<SweepResponse>("POST", `/competitors/${encodeURIComponent(id)}:sweep`);
+/** POST /v1/competitors/{id}:check → 202 { detail }. */
+export function checkCompetitor(id: string): Promise<CheckResponse> {
+  return mutate<CheckResponse>("POST", `/competitors/${encodeURIComponent(id)}:check`);
 }
 
 export function generateWeeklyCompetitorReport(): Promise<WeeklyCompetitorReport> {

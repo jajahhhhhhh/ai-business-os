@@ -43,9 +43,7 @@ class S3ObjectStorage:
 
     def _put(self, key: str, data: bytes, content_type: str) -> None:
         self._ensure_bucket()
-        self._client.put_object(
-            Bucket=self._bucket, Key=key, Body=data, ContentType=content_type
-        )
+        self._client.put_object(Bucket=self._bucket, Key=key, Body=data, ContentType=content_type)
 
     def _get(self, key: str) -> bytes:
         response = self._client.get_object(Bucket=self._bucket, Key=key)

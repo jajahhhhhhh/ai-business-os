@@ -11,6 +11,7 @@ import type {
   ChangeCategory,
   ChangeSeverity,
   CompetitorKind,
+  CompetitorSourceType,
   DrawRowStatus,
   DrawStatus,
   KbDocumentStatus,
@@ -19,8 +20,6 @@ import type {
   LeadStage,
   MilestoneStatus,
   ReportKind,
-  SourceFetchStatus,
-  SourceType,
 } from "./types";
 
 export type Locale = "th" | "en";
@@ -71,37 +70,62 @@ export const LEAD_KIND_LABELS: Record<LeadKind, LocalizedText> = {
 };
 
 export const SEVERITY_LABELS: Record<ChangeSeverity, LocalizedText> = {
-  low: { th: "ต่ำ", en: "Low" },
+  low: { th: "ทั่วไป", en: "Low" },
   medium: { th: "ปานกลาง", en: "Medium" },
-  high: { th: "สูง", en: "High" },
+  high: { th: "สำคัญ", en: "High" },
   critical: { th: "วิกฤต", en: "Critical" },
 };
 
-/** Change-event categories — `baseline` = first snapshot of a competitor. */
+/** Change-feed categories (GET /v1/competitors/changes). */
 export const CHANGE_CATEGORY_LABELS: Record<ChangeCategory, LocalizedText> = {
-  baseline: { th: "เริ่มติดตาม", en: "Baseline" },
   pricing: { th: "ราคา", en: "Pricing" },
-  promotion: { th: "โปรโมชัน", en: "Promotion" },
-  content: { th: "เนื้อหา", en: "Content" },
-  availability: { th: "ห้องว่าง", en: "Availability" },
-  reviews: { th: "รีวิว", en: "Reviews" },
+  promotion: { th: "โปรโมชั่น", en: "Promotion" },
+  content: { th: "คอนเทนต์", en: "Content" },
+  listing: { th: "ที่พัก", en: "Listing" },
   other: { th: "อื่น ๆ", en: "Other" },
 };
 
-export const SOURCE_TYPE_LABELS: Record<SourceType, LocalizedText> = {
+function isChangeCategory(value: string): value is ChangeCategory {
+  return value in CHANGE_CATEGORY_LABELS;
+}
+
+/** Thai label for a change category; falls back to the raw value so an unknown category never crashes the feed. */
+export function changeCategoryLabel(
+  category: string,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  const slug = category.toLowerCase();
+  return isChangeCategory(slug) ? CHANGE_CATEGORY_LABELS[slug][locale] : category;
+}
+
+export const SOURCE_TYPE_LABELS: Record<CompetitorSourceType, LocalizedText> = {
   website: { th: "เว็บไซต์", en: "Website" },
   rss: { th: "RSS", en: "RSS" },
-  sitemap: { th: "แผนผังเว็บ", en: "Sitemap" },
 };
 
-/** Outcome of the collector's last fetch of a source. */
-export const SOURCE_STATUS_LABELS: Record<SourceFetchStatus, LocalizedText> = {
+/**
+ * Outcome of the collector's last check of a source. `last_status` is a free
+ * string on the API — always resolve through sourceStatusLabel().
+ */
+export const SOURCE_STATUS_LABELS: Record<string, LocalizedText> = {
+  baseline: { th: "เก็บข้อมูลตั้งต้นแล้ว", en: "Baseline" },
   ok: { th: "ปกติ", en: "OK" },
   unchanged: { th: "ไม่เปลี่ยนแปลง", en: "Unchanged" },
   changed: { th: "พบการเปลี่ยนแปลง", en: "Changed" },
+  blocked: { th: "ถูกปิดกั้น", en: "Blocked" },
   refused: { th: "ถูกปฏิเสธ", en: "Refused" },
   error: { th: "ผิดพลาด", en: "Error" },
 };
+
+/** Thai label for a source check status; falls back to the raw value. null → "ยังไม่เคยตรวจ". */
+export function sourceStatusLabel(
+  status: string | null,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  if (!status) return locale === "th" ? "ยังไม่เคยตรวจ" : "Never checked";
+  const entry = SOURCE_STATUS_LABELS[status.toLowerCase()];
+  return entry ? entry[locale] : status;
+}
 
 /** Competitor kinds offered by the create form (API stores a free string). */
 export const COMPETITOR_KIND_LABELS: Record<CompetitorKind, LocalizedText> = {

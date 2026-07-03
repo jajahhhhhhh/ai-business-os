@@ -23,7 +23,9 @@ from urllib.parse import urlparse
 
 import httpx
 
-USER_AGENT = "aibos-collector/0.1 (+https://howtoniksen.com/bot; contact ch_company@howtoniksen.com)"
+USER_AGENT = (
+    "aibos-collector/0.1 (+https://howtoniksen.com/bot; contact ch_company@howtoniksen.com)"
+)
 
 #: Domains that are never fetched regardless of source registry contents.
 #: Suffix match against the registrable host (subdomains included).

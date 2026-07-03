@@ -49,9 +49,7 @@ class LeadUseCases:
             next_cursor = Cursor(created_at=last.created_at, id=last.id).encode()
         return LeadPage(items=rows, next_cursor=next_cursor)
 
-    async def change_stage(
-        self, lead_id: uuid.UUID, new_stage: LeadStage, actor: str
-    ) -> LeadRow:
+    async def change_stage(self, lead_id: uuid.UUID, new_stage: LeadStage, actor: str) -> LeadRow:
         lead = await self._repo.get(lead_id)
         if lead is None:
             raise NotFoundError("lead", lead_id)

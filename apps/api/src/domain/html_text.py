@@ -1,9 +1,11 @@
 """HTML -> normalized plain text for competitor page snapshots (M3).
 
 Pure stdlib (html.parser). Deterministic: identical HTML always yields
-identical text, so the snapshot content hash is stable. Script/style/
-noscript/head content is dropped, block-level elements become line breaks,
-whitespace runs collapse, and entities are decoded by the parser.
+identical text, so the snapshot content hash is stable. Script/style/nav/
+noscript/head content is dropped (nav is menu chrome, not competitor
+content), block-level elements become line breaks, whitespace runs collapse,
+and entities are decoded by the parser. Malformed HTML never raises: the
+stdlib parser is tolerant by design.
 """
 
 from __future__ import annotations
@@ -11,15 +13,49 @@ from __future__ import annotations
 import re
 from html.parser import HTMLParser
 
-_SKIP_TAGS = frozenset({"script", "style", "noscript", "head", "template"})
+_SKIP_TAGS = frozenset({"script", "style", "noscript", "nav", "head", "template"})
 
 _BLOCK_TAGS = frozenset(
     {
-        "address", "article", "aside", "blockquote", "br", "caption", "dd",
-        "div", "dl", "dt", "fieldset", "figcaption", "figure", "footer",
-        "form", "h1", "h2", "h3", "h4", "h5", "h6", "header", "hr", "li",
-        "main", "nav", "ol", "option", "p", "pre", "section", "select",
-        "table", "tbody", "td", "tfoot", "th", "thead", "tr", "ul",
+        "address",
+        "article",
+        "aside",
+        "blockquote",
+        "br",
+        "caption",
+        "dd",
+        "div",
+        "dl",
+        "dt",
+        "fieldset",
+        "figcaption",
+        "figure",
+        "footer",
+        "form",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "header",
+        "hr",
+        "li",
+        "main",
+        "ol",
+        "option",
+        "p",
+        "pre",
+        "section",
+        "select",
+        "table",
+        "tbody",
+        "td",
+        "tfoot",
+        "th",
+        "thead",
+        "tr",
+        "ul",
     }
 )
 

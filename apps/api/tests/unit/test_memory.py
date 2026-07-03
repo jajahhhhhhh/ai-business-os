@@ -65,9 +65,7 @@ class TestRemember:
     async def test_importance_out_of_range_rejected(self) -> None:
         use_cases, _, _ = make_use_cases()
         with pytest.raises(InvalidImportanceError):
-            await use_cases.remember(
-                kind="task", subject="s", body="b", importance=6, actor="test"
-            )
+            await use_cases.remember(kind="task", subject="s", body="b", importance=6, actor="test")
 
 
 class TestRecall:
@@ -167,9 +165,7 @@ class TestConsolidate:
 
     async def test_dissimilar_memories_not_merged(self) -> None:
         use_cases, _, _ = make_use_cases()
-        await use_cases.remember(
-            kind="business", subject="งานไฟฟ้า", body="450,000 บาท", actor="t"
-        )
+        await use_cases.remember(kind="business", subject="งานไฟฟ้า", body="450,000 บาท", actor="t")
         await use_cases.remember(
             kind="business", subject="Reddit lead sweep cadence", body="every 4h", actor="t"
         )
@@ -182,8 +178,11 @@ class TestConsolidate:
             kind="business", subject="dup subject", body="v1", importance=1, actor="t"
         )
         b = await use_cases.remember(
-            kind="business", subject="dup subject", body="v2 (different body)",
-            importance=4, actor="t",
+            kind="business",
+            subject="dup subject",
+            body="v2 (different body)",
+            importance=4,
+            actor="t",
         )
         await use_cases.remember(kind="business", subject="unique", body="v", actor="t")
         result = await use_cases.consolidate("test")

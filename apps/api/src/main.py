@@ -8,7 +8,12 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI
 
 from src.config import Settings, get_settings
-from src.infrastructure.adapters import KbAdapters, build_kb_adapters
+from src.infrastructure.adapters import (
+    CompetitorAdapters,
+    KbAdapters,
+    build_competitor_adapters,
+    build_kb_adapters,
+)
 from src.infrastructure.db import build_engine, build_sessionmaker
 from src.interfaces.dependencies import require_principal
 from src.interfaces.middleware import RequestContextMiddleware
@@ -31,15 +36,20 @@ from src.logging_setup import configure_logging
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
+    await app.state.competitor_adapters.aclose()
     await app.state.engine.dispose()
 
 
 def create_app(
-    settings: Settings | None = None, *, kb_adapters: KbAdapters | None = None
+    settings: Settings | None = None,
+    *,
+    kb_adapters: KbAdapters | None = None,
+    competitor_adapters: CompetitorAdapters | None = None,
 ) -> FastAPI:
-    """Build the app. `kb_adapters` is the M2 test seam: integration tests
-    inject in-memory fakes (tests/fakes.py) so they run with only PostgreSQL
-    available; production wiring comes from build_kb_adapters(settings)."""
+    """Build the app. `kb_adapters` (M2) and `competitor_adapters` (M3) are
+    test seams: integration tests inject in-memory fakes (tests/fakes.py) so
+    they run with only PostgreSQL available; production wiring comes from
+    build_kb_adapters / build_competitor_adapters."""
     settings = settings or get_settings()
     configure_logging(settings)
 
@@ -56,6 +66,9 @@ def create_app(
     app.state.engine = build_engine(settings.database_url)
     app.state.sessionmaker = build_sessionmaker(app.state.engine)
     app.state.kb_adapters = kb_adapters or build_kb_adapters(settings)
+    app.state.competitor_adapters = competitor_adapters or build_competitor_adapters(
+        settings, app.state.sessionmaker
+    )
 
     app.add_middleware(RequestContextMiddleware)
     register_exception_handlers(app)

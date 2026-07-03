@@ -73,9 +73,7 @@ async def test_ingest_match_confirm_pays_draw(client: AsyncClient) -> None:
     assert confirm.status_code == 200
     assert confirm.json()["status"] == "confirmed"
 
-    draws = (
-        await client.get("/v1/renovation/draws", params={"site_id": ctx["site"]["id"]})
-    ).json()
+    draws = (await client.get("/v1/renovation/draws", params={"site_id": ctx["site"]["id"]})).json()
     assert len(draws) == 1
     assert draws[0]["status"] == "paid"
     assert draws[0]["contractor_name"] == ctx["contractor"]["name"]
@@ -120,8 +118,7 @@ async def test_manual_match_and_ignore(client: AsyncClient) -> None:
             "/v1/renovation/bank-alerts:ingest",
             json={
                 "raw_text": (
-                    f"BBL โอนเงินออกจากบัญชี ...9999 จำนวน 44,444.44 บาท "
-                    f"ref-{uuid.uuid4().hex}"
+                    f"BBL โอนเงินออกจากบัญชี ...9999 จำนวน 44,444.44 บาท " f"ref-{uuid.uuid4().hex}"
                 ),
                 "source": "manual",
             },

@@ -150,9 +150,7 @@ async def test_kb_upload_index_search_flow(client: AsyncClient) -> None:
         "/v1/kb/search", params={"q": "plumbing quotation", "mode": "keyword"}
     )
     assert search_en.status_code == 200
-    assert any(
-        result["document_id"] == document["id"] for result in search_en.json()["results"]
-    )
+    assert any(result["document_id"] == document["id"] for result in search_en.json()["results"])
 
 
 async def test_kb_upload_rejects_oversized_file(client: AsyncClient, app: FastAPI) -> None:
@@ -222,9 +220,7 @@ async def test_memory_remember_recall_consolidate_flow(client: AsyncClient) -> N
     assert result["expired"] >= 0
 
     # After consolidation only the high-importance duplicate is recalled.
-    recall_after = await client.get(
-        "/v1/memory/search", params={"q": marker, "kind": "business"}
-    )
+    recall_after = await client.get("/v1/memory/search", params={"q": marker, "kind": "business"})
     ids_after = {hit["id"] for hit in recall_after.json()}
     assert survivor_id in ids_after
     assert first.json()["id"] not in ids_after

@@ -42,11 +42,9 @@ async def test_metrics_exposition(client: AsyncClient) -> None:
 async def test_renovation_site_quotation_draw_pay_flow(client: AsyncClient) -> None:
     suffix = uuid.uuid4().hex[:8]
 
-    site = (
-        await client.post(
-            "/v1/renovation/sites",
-            json={"name": f"Lipa Noi {suffix}", "location": "Koh Samui", "budget_thb": "2000000"},
-        )
+    site = await client.post(
+        "/v1/renovation/sites",
+        json={"name": f"Lipa Noi {suffix}", "location": "Koh Samui", "budget_thb": "2000000"},
     )
     assert site.status_code == 201, site.text
     site_id = site.json()["id"]

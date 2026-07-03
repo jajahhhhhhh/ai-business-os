@@ -23,6 +23,8 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 DISPATCHABLE = {
     "sync_bank_alerts": "src.worker.sync_bank_alerts",
     "send_daily_snapshot": "src.worker.send_daily_snapshot",
+    "sweep_all_competitors": "src.worker.sweep_all_competitors",
+    "weekly_competitor_report": "src.worker.weekly_competitor_report",
 }
 
 

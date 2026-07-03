@@ -48,9 +48,7 @@ async def seed() -> None:
                     print(f"site {name} already present")
 
             contractor = (
-                await session.execute(
-                    sa.select(Contractor).where(Contractor.name == CONTRACTOR)
-                )
+                await session.execute(sa.select(Contractor).where(Contractor.name == CONTRACTOR))
             ).scalar_one_or_none()
             if contractor is None:
                 session.add(Contractor(name=CONTRACTOR))

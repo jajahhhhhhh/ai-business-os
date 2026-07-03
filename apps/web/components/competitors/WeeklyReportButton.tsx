@@ -27,7 +27,7 @@ export function WeeklyReportButton() {
         }}
       >
         <FileText size={14} />
-        {pending ? "กำลังสร้างรายงาน..." : "สร้างรายงานสัปดาห์นี้"}
+        {pending ? "กำลังสร้างรายงาน..." : "สร้างรายงานสัปดาห์ตอนนี้"}
       </Button>
 
       {error && (

@@ -5,6 +5,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+### Added — M3 Competitor intelligence
+- Competitor registry with per-competitor monitored sources (website/RSS);
+  Facebook/Airbnb/Booking/Agoda URLs refused at registration with a Thai
+  §8.4 policy explanation (compliance gate, structurally enforced).
+- Daily sweep (06:00 Asia/Bangkok + per-competitor "ตรวจตอนนี้"): compliance-
+  gated fetch → text normalization → content-hash diffing → snapshot archive
+  in MinIO → change events with category/severity.
+- ChangeAnalyst: Haiku-tier Thai diff summaries and severity classification,
+  hard daily USD budget from `agent_runs` spend; over budget or key absent →
+  deterministic keyword fallback. Every LLM attempt traced to `agent_runs`.
+- Weekly Thai competitor report (Mon 08:00 + on-demand): grouped change
+  digest upgraded with "บทวิเคราะห์" and "3 สิ่งที่ควรทำ", stored + LINE push.
+- คู่แข่ง dashboard rebuild: add/manage competitors and sources, sweep
+  status chips, global change feed with severity filter, weekly report button.
+- API Docker image now builds from repo root and bundles the shared
+  compliance-gated collectors package; ruff pinned <0.9 and all Python
+  packages `ruff format`-normalized (CI formatting gate now actually passes).
+
 ### Added — M2 Knowledge base + memory
 - Document ingestion pipeline: upload (25 MB cap) → MinIO original → text
   extraction (PDF via pdfplumber, Thai OCR fallback via Tesseract, images,

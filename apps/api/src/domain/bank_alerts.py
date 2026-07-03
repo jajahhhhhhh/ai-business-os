@@ -128,9 +128,7 @@ _ACCOUNT_PATTERN = re.compile(
     r"(?:บัญชี|account)\s*(?:เลขที่\s*|no\.?\s*|number\s*)?([0-9xX*.\-…]*[0-9])"
 )
 
-_DATE_PATTERN = re.compile(
-    r"(\d{1,2})/(\d{1,2})/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?"
-)
+_DATE_PATTERN = re.compile(r"(\d{1,2})/(\d{1,2})/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?")
 
 
 def _detect_direction(text: str) -> Direction | None:

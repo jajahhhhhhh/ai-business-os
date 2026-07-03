@@ -72,9 +72,7 @@ class TestPdfDispatch:
         monkeypatch.setattr(parsing, "_pdf_available", lambda: True)
         monkeypatch.setattr(parsing, "_ocr_available", lambda: True)
         monkeypatch.setattr(parsing, "_pdf_page_texts", lambda data: pages)
-        monkeypatch.setattr(
-            parsing, "_ocr_pdf", lambda data: pytest.fail("OCR must not run")
-        )
+        monkeypatch.setattr(parsing, "_ocr_pdf", lambda data: pytest.fail("OCR must not run"))
         result = extract_text(b"%PDF", "application/pdf")
         assert result.ocr_used is False
         assert "A" * 200 in result.text and "B" * 200 in result.text

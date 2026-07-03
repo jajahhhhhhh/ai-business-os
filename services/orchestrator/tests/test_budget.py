@@ -6,9 +6,7 @@ from orchestrator.budget import BudgetExceeded, DailyBudget
 
 
 def make_budget(**caps: str) -> DailyBudget:
-    return DailyBudget(
-        caps={k: Decimal(v) for k, v in caps.items()}, global_cap=Decimal("10.00")
-    )
+    return DailyBudget(caps={k: Decimal(v) for k, v in caps.items()}, global_cap=Decimal("10.00"))
 
 
 def test_spend_within_cap_passes() -> None:
@@ -39,9 +37,7 @@ def test_unknown_agent_has_zero_cap() -> None:
 
 
 def test_global_cap_enforced_across_agents() -> None:
-    b = DailyBudget(
-        caps={"a": Decimal("8.00"), "b": Decimal("8.00")}, global_cap=Decimal("10.00")
-    )
+    b = DailyBudget(caps={"a": Decimal("8.00"), "b": Decimal("8.00")}, global_cap=Decimal("10.00"))
     b.record("a", Decimal("6.00"))
     b.record("b", Decimal("5.00"))  # total 11 > 10
     with pytest.raises(BudgetExceeded) as exc:

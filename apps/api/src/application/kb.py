@@ -120,9 +120,7 @@ class KnowledgeBaseUseCases:
         )
         return row
 
-    async def process_document(
-        self, document_id: uuid.UUID, actor: str = "worker"
-    ) -> DocumentRow:
+    async def process_document(self, document_id: uuid.UUID, actor: str = "worker") -> DocumentRow:
         """Parse -> chunk -> index one document. Raises on failure.
 
         The caller (src/worker.py run_document_pipeline) persists
@@ -143,9 +141,7 @@ class KnowledgeBaseUseCases:
         if not chunks:
             raise EmptyDocumentError()
 
-        rows = list(
-            await self._repo.replace_chunks(document_id, [(c.seq, c.text) for c in chunks])
-        )
+        rows = list(await self._repo.replace_chunks(document_id, [(c.seq, c.text) for c in chunks]))
         # New chunk rows get new uuids, so drop the old index entries first.
         await self._keyword.delete_document(document_id)
         await self._keyword.index_chunks(
@@ -217,9 +213,7 @@ class KnowledgeBaseUseCases:
             raise NotFoundError("document", document_id)
         return DocumentDetail(document=doc, chunk_count=await self._repo.chunk_count(document_id))
 
-    async def search(
-        self, q: str, mode: SearchMode = "hybrid", limit: int = 10
-    ) -> SearchResults:
+    async def search(self, q: str, mode: SearchMode = "hybrid", limit: int = 10) -> SearchResults:
         limit = max(1, min(limit, MAX_SEARCH_LIMIT))
         keyword_ids: list[str] = []
         semantic_ids: list[str] = []

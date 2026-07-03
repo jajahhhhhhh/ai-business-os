@@ -37,9 +37,9 @@ class RssCollector:
             title = entry.findtext(f"{_ATOM_NS}title") or ""
             link_el = entry.find(f"{_ATOM_NS}link")
             link = link_el.get("href", "") if link_el is not None else ""
-            summary = entry.findtext(f"{_ATOM_NS}summary") or entry.findtext(
-                f"{_ATOM_NS}content"
-            ) or ""
+            summary = (
+                entry.findtext(f"{_ATOM_NS}summary") or entry.findtext(f"{_ATOM_NS}content") or ""
+            )
             docs.append(
                 RawDocument(
                     source_name=self.source_name,

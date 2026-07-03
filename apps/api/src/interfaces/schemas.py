@@ -252,6 +252,15 @@ class CompetitorOut(ORMModel):
     created_at: datetime
 
 
+class CompetitorUpdate(BaseModel):
+    """PATCH body: only fields explicitly provided are applied."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    kind: str | None = None
+    website: str | None = None
+    active: bool | None = None
+
+
 class ChangeEventOut(ORMModel):
     id: uuid.UUID
     competitor_id: uuid.UUID
@@ -260,6 +269,59 @@ class ChangeEventOut(ORMModel):
     summary: str
     severity: str
     detected_at: datetime
+
+
+ChangeSeverity = Literal["low", "medium", "high", "critical"]
+SourceType = Literal["website", "rss"]
+
+
+class ChangeEventFeedOut(ORMModel):
+    """GET /v1/competitors/changes item: event enriched with competitor name."""
+
+    id: uuid.UUID
+    competitor_id: uuid.UUID
+    competitor_name: str
+    category: str
+    summary: str
+    severity: str
+    detected_at: datetime
+
+
+class CompetitorSourceIn(BaseModel):
+    """A monitored source as registered by the owner (URL is blocklist-checked)."""
+
+    type: SourceType
+    url: str = Field(min_length=1, max_length=2_000)
+
+
+class CompetitorSourceOut(ORMModel):
+    id: uuid.UUID
+    type: str
+    url: str | None
+    enabled: bool
+    tos_policy: str
+    last_checked_at: datetime | None
+    last_status: str | None
+
+
+class CompetitorRegisterIn(CompetitorCreate):
+    """POST /v1/competitors body: competitor plus optional monitored sources.
+
+    A website without explicit sources gets an automatic 'website' source.
+    """
+
+    sources: list[CompetitorSourceIn] | None = None
+
+
+class CompetitorWithSourcesOut(CompetitorOut):
+    sources: list[CompetitorSourceOut]
+
+
+class SweepAccepted(BaseModel):
+    """POST /v1/competitors/{id}:check response (202)."""
+
+    dispatched: bool
+    detail: str
 
 
 # ------------------------------------------------------------------ knowledge base

@@ -5,7 +5,8 @@ from __future__ import annotations
 import difflib
 from dataclasses import dataclass
 
-EXCERPT_MAX_CHARS = 2000
+# Cap on the unified-diff excerpt handed to the ChangeAnalyst LLM (spec §M3).
+EXCERPT_MAX_CHARS = 8000
 
 
 @dataclass(frozen=True, slots=True)

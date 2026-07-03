@@ -183,9 +183,7 @@ async def create_draw(
 
 
 @router.post("/draws/{draw_id}/pay", response_model=DrawOut)
-async def pay_draw(
-    draw_id: uuid.UUID, use_cases: UseCasesDep, principal: PrincipalDep
-) -> DrawOut:
+async def pay_draw(draw_id: uuid.UUID, use_cases: UseCasesDep, principal: PrincipalDep) -> DrawOut:
     return DrawOut.model_validate(await use_cases.pay_draw(draw_id, principal.actor))
 
 

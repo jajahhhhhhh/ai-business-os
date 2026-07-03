@@ -177,12 +177,13 @@ class Source(TimestampMixin, Base):
     rate_limit_per_hr: Mapped[int] = mapped_column(server_default=sa.text("60"))
     enabled: Mapped[bool] = mapped_column(server_default=sa.text("false"))
     # M3 competitor intel: source belongs to a competitor (nullable for
-    # generic lead sources) + last sweep outcome per source.
+    # generic lead sources; deleting a competitor removes its sources) +
+    # last sweep outcome per source.
     competitor_id: Mapped[uuid.UUID | None] = mapped_column(
-        sa.ForeignKey("competitors.id", ondelete="SET NULL")
+        sa.ForeignKey("competitors.id", ondelete="CASCADE")
     )
-    last_fetched_at: Mapped[datetime | None]
-    # ok|unchanged|changed|refused|error
+    last_checked_at: Mapped[datetime | None]
+    # baseline|unchanged|changed|'blocked: <reason>'|'error: <detail>'
     last_status: Mapped[str | None]
 
 

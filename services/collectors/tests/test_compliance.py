@@ -52,9 +52,7 @@ class TestCheckUrl:
 
     def test_prohibited_tos_policy_refused(self) -> None:
         with pytest.raises(ComplianceViolation) as exc:
-            self.gate.check_url(
-                make_policy(tos_policy=TosPolicy.PROHIBITED), "https://example.com"
-            )
+            self.gate.check_url(make_policy(tos_policy=TosPolicy.PROHIBITED), "https://example.com")
         assert exc.value.reason == "tos_policy"
 
     def test_review_tos_policy_refused(self) -> None:

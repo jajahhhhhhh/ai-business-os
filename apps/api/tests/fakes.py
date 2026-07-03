@@ -1,8 +1,9 @@
-"""In-memory fakes for the M2 gateway ports (src/application/ports.py).
+"""In-memory fakes for the M2/M3 gateway ports (src/application/ports.py).
 
 Shared by the unit tests and the DATABASE_URL-gated integration tests: the
-integration suite runs with ONLY PostgreSQL available — MinIO, Meilisearch
-and Qdrant are replaced by these fakes via create_app(kb_adapters=...). The
+integration suite runs with ONLY PostgreSQL available — MinIO, Meilisearch,
+Qdrant, the compliance-gated fetcher and the Anthropic analyst are replaced
+by these fakes via create_app(kb_adapters=..., competitor_adapters=...). The
 real adapters are exercised against the VPS/CI docker-compose stack.
 """
 
@@ -85,9 +86,7 @@ class InMemoryVectorIndex:
         for point_id in ids:
             store.pop(point_id, None)
 
-    async def search(
-        self, collection: str, vector: Sequence[float], limit: int
-    ) -> list[VectorHit]:
+    async def search(self, collection: str, vector: Sequence[float], limit: int) -> list[VectorHit]:
         store = self.collections.get(collection, {})
         hits = [
             VectorHit(id=point_id, score=_cosine(list(vector), stored), payload=payload)
@@ -148,9 +147,7 @@ class BrokenVectorIndex:
     async def delete_points(self, collection: str, ids: Sequence[str]) -> None:
         raise ConnectionError("qdrant is down")
 
-    async def search(
-        self, collection: str, vector: Sequence[float], limit: int
-    ) -> list[VectorHit]:
+    async def search(self, collection: str, vector: Sequence[float], limit: int) -> list[VectorHit]:
         raise ConnectionError("qdrant is down")
 
 
@@ -249,11 +246,7 @@ class FakeKnowledgeBaseRepository:
         return self.documents.get(document_id)
 
     async def list_documents(self, status: str | None, limit: int) -> list[FakeDocumentRow]:
-        rows = [
-            row
-            for row in self.documents.values()
-            if status is None or row.status == status
-        ]
+        rows = [row for row in self.documents.values() if status is None or row.status == status]
         rows.sort(key=lambda row: row.created_at, reverse=True)
         return rows[:limit]
 
@@ -329,9 +322,7 @@ class FakeMemoryRepository:
         self.memories: dict[uuid.UUID, FakeMemoryRow] = {}
 
     def _is_active(self, row: FakeMemoryRow, now: datetime) -> bool:
-        return row.consolidated_into is None and (
-            row.expires_at is None or row.expires_at > now
-        )
+        return row.consolidated_into is None and (row.expires_at is None or row.expires_at > now)
 
     async def create(
         self,
@@ -406,3 +397,306 @@ class FakeMemoryRepository:
     async def delete_many(self, memory_ids: Sequence[uuid.UUID]) -> None:
         for memory_id in memory_ids:
             self.memories.pop(memory_id, None)
+
+
+# ------------------------------------------------------- M3: competitor intel
+# Fakes for the Fetcher/ChangeAnalyst ports, the RunRecorder budget seam and
+# the CompetitorIntelRepository protocol (sweep state-machine unit tests).
+
+from datetime import timedelta  # noqa: E402
+from decimal import Decimal  # noqa: E402
+
+from src.application.ports import ChangeClassification, FetchPolicy  # noqa: E402
+
+UPGRADE_ANALYSIS_HEADER = "บทวิเคราะห์"
+UPGRADE_ACTIONS_HEADER = "3 สิ่งที่ควรทำ"
+
+
+class FakeFetcher:
+    """URL -> canned text; an Exception value is raised instead of returned."""
+
+    def __init__(self) -> None:
+        self.responses: dict[str, str | Exception] = {}
+        self.calls: list[tuple[str, str]] = []  # (policy bucket, url)
+
+    def set(self, url: str, response: str | Exception) -> None:
+        self.responses[url] = response
+
+    async def fetch(self, policy: FetchPolicy, url: str) -> str:
+        self.calls.append((policy.name, url))
+        response = self.responses.get(url)
+        if response is None:
+            raise ConnectionError(f"no fake response registered for {url}")
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+
+class FakeChangeAnalyst:
+    """classify returns the configured verdict (None -> rule-based fallback);
+    upgrade_weekly_report appends the two executive sections like the real
+    Anthropic analyst is prompted to."""
+
+    def __init__(
+        self,
+        classification: ChangeClassification | None = None,
+        *,
+        upgrade: bool = True,
+    ) -> None:
+        self.classification = classification
+        self.upgrade = upgrade
+        self.classify_calls: list[tuple[str, str]] = []  # (diff, competitor_name)
+        self.upgrade_calls: list[str] = []
+
+    async def classify(self, diff: str, competitor_name: str) -> ChangeClassification | None:
+        self.classify_calls.append((diff, competitor_name))
+        return self.classification
+
+    async def upgrade_weekly_report(self, draft: str) -> str:
+        self.upgrade_calls.append(draft)
+        if not self.upgrade:
+            return draft
+        return (
+            f"{draft}\n\n{UPGRADE_ANALYSIS_HEADER}\n"
+            "คู่แข่งกำลังขยับราคาช่วงไฮซีซั่น\n\n"
+            f"{UPGRADE_ACTIONS_HEADER}\n1) เช็คราคา 2) อัปเดตเพจ 3) เตรียมโปรโมชั่น"
+        )
+
+
+class FakeRunRecorder:
+    """RunRecorder with a settable 'spent today' figure for budget-guard tests."""
+
+    def __init__(self, today_cost: Decimal = Decimal("0")) -> None:
+        self.today_cost = today_cost
+        self.rows: list[dict[str, Any]] = []
+
+    async def cost_today_usd(self, now: datetime) -> Decimal:
+        return self.today_cost
+
+    async def record(self, **kwargs: Any) -> None:
+        self.rows.append(kwargs)
+
+
+@dataclass
+class FakeCompetitorRow:
+    id: uuid.UUID
+    name: str
+    kind: str | None = None
+    website: str | None = None
+    active: bool = True
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@dataclass
+class FakeSourceRow:
+    id: uuid.UUID
+    name: str
+    type: str
+    url: str | None
+    tos_policy: str = "allowed"
+    rate_limit_per_hr: int = 6
+    enabled: bool = True
+    competitor_id: uuid.UUID | None = None
+    competitor_name: str | None = None
+    last_checked_at: datetime | None = None
+    last_status: str | None = None
+
+
+@dataclass
+class FakeSnapshotRow:
+    id: uuid.UUID
+    competitor_id: uuid.UUID
+    source_id: uuid.UUID | None
+    captured_at: datetime
+    content_hash: str
+    storage_key: str
+
+
+@dataclass
+class FakeChangeEventRow:
+    id: uuid.UUID
+    competitor_id: uuid.UUID
+    competitor_name: str
+    snapshot_id: uuid.UUID | None
+    category: str
+    summary: str
+    severity: str
+    detected_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@dataclass
+class FakeReportRow:
+    id: uuid.UUID
+    kind: str
+    period: str | None
+    lang: str
+    body: str | None
+    sent_at: datetime | None
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+class FakeCompetitorIntelRepository:
+    """Dict-backed CompetitorIntelRepository for sweep/report unit tests."""
+
+    def __init__(self) -> None:
+        self.competitors: dict[uuid.UUID, FakeCompetitorRow] = {}
+        self.sources: dict[uuid.UUID, FakeSourceRow] = {}
+        self.snapshots: list[FakeSnapshotRow] = []
+        self.change_events: list[FakeChangeEventRow] = []
+        self.reports: list[FakeReportRow] = []
+        self._tick = 0
+
+    def _now(self) -> datetime:
+        # Strictly increasing timestamps so latest_snapshot ordering is stable
+        # even when several rows land within the same wall-clock microsecond.
+        self._tick += 1
+        return datetime.now(UTC) + timedelta(microseconds=self._tick)
+
+    def add_competitor(
+        self, name: str, *, active: bool = True, website: str | None = None
+    ) -> FakeCompetitorRow:
+        row = FakeCompetitorRow(id=uuid.uuid4(), name=name, active=active, website=website)
+        self.competitors[row.id] = row
+        return row
+
+    async def get_competitor(self, competitor_id: uuid.UUID) -> FakeCompetitorRow | None:
+        return self.competitors.get(competitor_id)
+
+    async def create_competitor(
+        self,
+        *,
+        name: str,
+        kind: str | None,
+        website: str | None,
+        listing_urls: dict[str, Any] | None,
+    ) -> FakeCompetitorRow:
+        row = FakeCompetitorRow(id=uuid.uuid4(), name=name, kind=kind, website=website)
+        self.competitors[row.id] = row
+        return row
+
+    async def create_source(
+        self,
+        *,
+        name: str,
+        type: str,  # noqa: A002 - mirrors the protocol
+        url: str,
+        competitor_id: uuid.UUID | None,
+        rate_limit_per_hr: int,
+        tos_policy: str,
+        robots_ok: bool,
+        enabled: bool,
+    ) -> FakeSourceRow:
+        competitor = self.competitors.get(competitor_id) if competitor_id else None
+        row = FakeSourceRow(
+            id=uuid.uuid4(),
+            name=name,
+            type=type,
+            url=url,
+            tos_policy=tos_policy,
+            rate_limit_per_hr=rate_limit_per_hr,
+            enabled=enabled,
+            competitor_id=competitor_id,
+            competitor_name=competitor.name if competitor else None,
+        )
+        self.sources[row.id] = row
+        return row
+
+    async def get_source(self, source_id: uuid.UUID) -> FakeSourceRow | None:
+        return self.sources.get(source_id)
+
+    async def delete_source(self, source_id: uuid.UUID) -> None:
+        self.sources.pop(source_id, None)
+
+    async def list_sources(self, competitor_id: uuid.UUID | None) -> list[FakeSourceRow]:
+        return [
+            row
+            for row in self.sources.values()
+            if competitor_id is None or row.competitor_id == competitor_id
+        ]
+
+    async def sweep_sources(self, competitor_id: uuid.UUID | None) -> list[FakeSourceRow]:
+        rows = []
+        for row in self.sources.values():
+            if not row.enabled or row.competitor_id is None:
+                continue
+            competitor = self.competitors.get(row.competitor_id)
+            if competitor is None or not competitor.active:
+                continue
+            if competitor_id is not None and row.competitor_id != competitor_id:
+                continue
+            rows.append(row)
+        return rows
+
+    async def set_source_result(
+        self, source_id: uuid.UUID, status: str, checked_at: datetime | None
+    ) -> None:
+        source = self.sources.get(source_id)
+        if source is None:
+            return
+        source.last_status = status
+        if checked_at is not None:
+            source.last_checked_at = checked_at
+
+    async def latest_snapshot(
+        self, competitor_id: uuid.UUID, source_id: uuid.UUID
+    ) -> FakeSnapshotRow | None:
+        rows = [
+            row
+            for row in self.snapshots
+            if row.competitor_id == competitor_id and row.source_id == source_id
+        ]
+        return max(rows, key=lambda row: row.captured_at) if rows else None
+
+    async def create_snapshot(
+        self,
+        *,
+        competitor_id: uuid.UUID,
+        source_id: uuid.UUID,
+        content_hash: str,
+        storage_key: str,
+    ) -> FakeSnapshotRow:
+        row = FakeSnapshotRow(
+            id=uuid.uuid4(),
+            competitor_id=competitor_id,
+            source_id=source_id,
+            captured_at=self._now(),
+            content_hash=content_hash,
+            storage_key=storage_key,
+        )
+        self.snapshots.append(row)
+        return row
+
+    async def create_change_event(
+        self,
+        *,
+        competitor_id: uuid.UUID,
+        snapshot_id: uuid.UUID | None,
+        category: str,
+        summary: str,
+        severity: str,
+    ) -> FakeChangeEventRow:
+        competitor = self.competitors.get(competitor_id)
+        row = FakeChangeEventRow(
+            id=uuid.uuid4(),
+            competitor_id=competitor_id,
+            competitor_name=competitor.name if competitor else "",
+            snapshot_id=snapshot_id,
+            category=category,
+            summary=summary,
+            severity=severity,
+            detected_at=self._now(),
+        )
+        self.change_events.append(row)
+        return row
+
+    async def change_events_since(self, since: datetime) -> list[FakeChangeEventRow]:
+        return [row for row in self.change_events if row.detected_at >= since]
+
+    async def create_report(
+        self, *, kind: str, period: str, lang: str, body: str, sent_at: datetime | None
+    ) -> FakeReportRow:
+        row = FakeReportRow(
+            id=uuid.uuid4(), kind=kind, period=period, lang=lang, body=body, sent_at=sent_at
+        )
+        self.reports.append(row)
+        return row

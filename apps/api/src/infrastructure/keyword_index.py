@@ -44,9 +44,7 @@ class MeilisearchKeywordIndex:
             if status == "succeeded":
                 return
             if status in ("failed", "canceled"):
-                raise RuntimeError(
-                    f"meilisearch task {task_uid} {status}: {payload.get('error')}"
-                )
+                raise RuntimeError(f"meilisearch task {task_uid} {status}: {payload.get('error')}")
             if time.monotonic() > deadline:
                 raise TimeoutError(f"meilisearch task {task_uid} still {status}")
             await asyncio.sleep(_TASK_POLL_SECONDS)

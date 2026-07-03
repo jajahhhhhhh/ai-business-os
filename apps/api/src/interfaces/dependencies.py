@@ -12,7 +12,7 @@ from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import Settings
-from src.infrastructure.adapters import KbAdapters
+from src.infrastructure.adapters import CompetitorAdapters, KbAdapters
 from src.infrastructure.models import ApiKey
 from src.infrastructure.security import hash_api_key
 from src.interfaces.problems import ProblemError
@@ -49,9 +49,16 @@ def get_kb_adapters(request: Request) -> KbAdapters:
     return adapters
 
 
+def get_competitor_adapters(request: Request) -> CompetitorAdapters:
+    """The M3 competitor-intel gateway set built by create_app (fakes in tests)."""
+    adapters: CompetitorAdapters = request.app.state.competitor_adapters
+    return adapters
+
+
 SettingsDep = Annotated[Settings, Depends(get_app_settings)]
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 KbAdaptersDep = Annotated[KbAdapters, Depends(get_kb_adapters)]
+CompetitorAdaptersDep = Annotated[CompetitorAdapters, Depends(get_competitor_adapters)]
 
 
 def _unauthorized(detail: str) -> ProblemError:

@@ -11,8 +11,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime
-from decimal import Decimal
+from datetime import datetime
 from typing import Any, Protocol
 
 
@@ -89,19 +88,34 @@ class Embedder(Protocol):
     async def embed_query(self, text: str) -> list[float]: ...
 
 
-# --------------------------------------------------------------- M3: LLM port
+# -------------------------------------------------- M3: competitor-intel ports
 
 
 @dataclass(frozen=True, slots=True)
-class ChangeAnalysis:
-    """LLM judgment on one competitor page diff (summary in Thai)."""
+class FetchPolicy:
+    """Per-source fetch policy handed to the Fetcher (mirrors the sources row).
 
-    summary_th: str
-    category: str  # pricing|promotion|content|availability|reviews|other
-    severity: str  # low|medium|high|critical
-    tokens_in: int
-    tokens_out: int
-    cost_usd: Decimal
+    Mirrors collectors.compliance.SourcePolicy without importing collectors:
+    the application layer stays importable when the optional collectors
+    package is absent; the infrastructure adapter converts lazily.
+    """
+
+    name: str  # rate-limit bucket key (the source id)
+    tos_policy: str  # 'allowed' | 'review' | 'prohibited'
+    rate_limit_per_hr: int
+    enabled: bool = True
+
+
+class Fetcher(Protocol):
+    """Compliance-gated outbound HTTP — the ONLY path a sweep may fetch through.
+
+    Production: infrastructure.adapters.ComplianceGateFetcher wrapping
+    collectors.compliance.ComplianceGate (robots.txt + rate limit + blocklist).
+    Raises application.errors.ComplianceRefusedError when the gate refuses;
+    any other exception is a plain fetch error.
+    """
+
+    async def fetch(self, policy: FetchPolicy, url: str) -> str: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,34 +130,23 @@ class WeeklyReportEvent:
 
 
 @dataclass(frozen=True, slots=True)
-class WeeklyReportContext:
-    period_start: date
-    period_end: date
-    # Deterministic Thai template (application/competitor_report.py) — the
-    # LLM upgrades it to an executive version; callers fall back to it as-is.
-    template_report: str
-    events: tuple[WeeklyReportEvent, ...]
+class ChangeClassification:
+    """LLM (or fallback) judgment on one competitor page diff."""
 
-
-@dataclass(frozen=True, slots=True)
-class ReportText:
-    text: str
-    tokens_in: int
-    tokens_out: int
-    cost_usd: Decimal
+    category: str  # pricing|promotion|content|listing|other
+    severity: str  # low|medium|high|critical
+    summary: str  # Thai, <=160 chars
 
 
 class ChangeAnalyst(Protocol):
-    """LLM gateway for competitor intel. None results mean "unavailable or
-    over budget" — callers must fall back to the rule-based path."""
+    """LLM gateway for competitor intel.
 
-    @property
-    def is_available(self) -> bool:
-        """False when no API key is configured (NullChangeAnalyst)."""
-        ...
+    classify returns None when the LLM is unavailable, over budget, or its
+    response is unusable — the caller falls back to the rule-based classifier.
+    upgrade_weekly_report NEVER raises and returns the draft unchanged on any
+    failure. Implementations record every real API attempt in agent_runs.
+    """
 
-    async def analyze_change(
-        self, competitor_name: str, url: str, diff_excerpt: str
-    ) -> ChangeAnalysis | None: ...
+    async def classify(self, diff: str, competitor_name: str) -> ChangeClassification | None: ...
 
-    async def compose_weekly_report(self, context: WeeklyReportContext) -> ReportText | None: ...
+    async def upgrade_weekly_report(self, draft: str) -> str: ...

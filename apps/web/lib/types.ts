@@ -295,7 +295,7 @@ export interface LeadListParams {
 }
 
 // ---------------------------------------------------------------------------
-// Competitor intelligence (M3) — registry, sources, change events
+// Competitor intelligence (M3) — registry with nested sources, change feed
 // ---------------------------------------------------------------------------
 
 /**
@@ -303,6 +303,28 @@ export interface LeadListParams {
  * is the UI vocabulary offered by the create form (see COMPETITOR_KIND_LABELS).
  */
 export type CompetitorKind = "villa" | "hotel" | "aspirational" | "other";
+
+/**
+ * Source types accepted by the API. Facebook/Airbnb/Booking/Agoda URLs are
+ * refused with a 422 problem+json (Thai detail) by the ToS compliance gate.
+ */
+export type CompetitorSourceType = "website" | "rss";
+
+/** Nested source row inside GET /v1/competitors · POST .../sources response. */
+export interface CompetitorSource {
+  id: string;
+  type: CompetitorSourceType;
+  url: string;
+  enabled: boolean;
+  /** ToS policy verdict recorded by the compliance gate. */
+  tos_policy: string;
+  last_checked_at: string | null;
+  /**
+   * Collector outcome — free string, e.g. "baseline" | "unchanged" |
+   * "changed" | "error" | "blocked". Labelled via sourceStatusLabel().
+   */
+  last_status: string | null;
+}
 
 /** GET /v1/competitors list item · POST/PATCH response body. */
 export interface Competitor {
@@ -312,15 +334,24 @@ export interface Competitor {
   website: string | null;
   active: boolean;
   created_at: string;
-  sources_count: number;
-  last_change_at: string | null;
+  sources: CompetitorSource[];
 }
 
-/** POST /v1/competitors */
+/** Source item accepted by POST /v1/competitors and POST .../sources. */
+export interface CompetitorSourceCreate {
+  type: CompetitorSourceType;
+  url: string;
+}
+
+/**
+ * POST /v1/competitors — responds 422 problem+json (Thai detail) when a
+ * source URL is ToS-blocked (Facebook / Airbnb / Booking / Agoda).
+ */
 export interface CompetitorCreate {
   name: string;
   kind?: string;
   website?: string;
+  sources?: CompetitorSourceCreate[];
 }
 
 /** PATCH /v1/competitors/{id} — all fields optional. */
@@ -333,17 +364,10 @@ export interface CompetitorPatch {
 
 export type ChangeSeverity = "low" | "medium" | "high" | "critical";
 
-export type ChangeCategory =
-  | "baseline"
-  | "pricing"
-  | "promotion"
-  | "content"
-  | "availability"
-  | "reviews"
-  | "other";
+export type ChangeCategory = "pricing" | "promotion" | "content" | "listing" | "other";
 
-/** GET /v1/change-events — newest first, competitor name denormalized in. */
-export interface ChangeEventRow {
+/** GET /v1/competitors/changes — newest first, competitor name denormalized in. */
+export interface CompetitorChange {
   id: string;
   competitor_id: string;
   competitor_name: string;
@@ -353,54 +377,15 @@ export interface ChangeEventRow {
   detected_at: string;
 }
 
-export interface ChangeEventListParams {
-  severity?: ChangeSeverity;
-  competitor_id?: string;
+export interface CompetitorChangeListParams {
   /** ISO-8601 lower bound on detected_at. */
   since?: string;
+  severity?: ChangeSeverity;
   limit?: number;
 }
 
-export type SourceType = "website" | "rss" | "sitemap";
-
-/** Outcome of the collector's last fetch of a source. */
-export type SourceFetchStatus = "ok" | "unchanged" | "changed" | "refused" | "error";
-
-/** GET /v1/sources list item · POST/PATCH response body. */
-export interface Source {
-  id: string;
-  name: string;
-  type: SourceType;
-  url: string;
-  /** ToS policy verdict recorded by the compliance gate (compliance.py). */
-  tos_policy: string;
-  enabled: boolean;
-  competitor_id: string | null;
-  competitor_name: string | null;
-  rate_limit_per_hr: number;
-  last_fetched_at: string | null;
-  last_status: SourceFetchStatus | null;
-}
-
-export interface SourceListParams {
-  competitor_id?: string;
-}
-
-/**
- * POST /v1/sources — responds 422 problem+json when the URL is ToS-prohibited
- * (e.g. facebook.com, airbnb); the detail is shown inline as the compliance gate.
- */
-export interface SourceCreate {
-  name: string;
-  type: SourceType;
-  url: string;
-  competitor_id?: string;
-  rate_limit_per_hr?: number;
-}
-
-/** POST /v1/competitors/{id}:sweep → 202 accepted. */
-export interface SweepResponse {
-  dispatched: boolean;
+/** POST /v1/competitors/{id}:check → 202 accepted. */
+export interface CheckResponse {
   detail: string;
 }
 

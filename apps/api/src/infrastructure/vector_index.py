@@ -82,9 +82,7 @@ class QdrantVectorIndex:
             if not _is_missing_collection(exc):
                 raise
 
-    async def search(
-        self, collection: str, vector: Sequence[float], limit: int
-    ) -> list[VectorHit]:
+    async def search(self, collection: str, vector: Sequence[float], limit: int) -> list[VectorHit]:
         try:
             result = await self._client.query_points(
                 collection, query=list(vector), limit=limit, with_payload=True

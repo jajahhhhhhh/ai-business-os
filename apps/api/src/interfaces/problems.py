@@ -103,20 +103,14 @@ def register_exception_handlers(app: FastAPI) -> None:
         return problem_response(request, status=404, title="Not Found", detail=str(exc))
 
     @app.exception_handler(ComplianceRefusedError)
-    async def _compliance_refused(
-        request: Request, exc: ComplianceRefusedError
-    ) -> JSONResponse:
-        return problem_response(
-            request, status=422, title="Unprocessable Entity", detail=str(exc)
-        )
+    async def _compliance_refused(request: Request, exc: ComplianceRefusedError) -> JSONResponse:
+        return problem_response(request, status=422, title="Unprocessable Entity", detail=str(exc))
 
     @app.exception_handler(UnrecognizedBankAlertError)
     async def _unrecognized_alert(
         request: Request, exc: UnrecognizedBankAlertError
     ) -> JSONResponse:
-        return problem_response(
-            request, status=422, title="Unprocessable Entity", detail=str(exc)
-        )
+        return problem_response(request, status=422, title="Unprocessable Entity", detail=str(exc))
 
     @app.exception_handler(DomainError)
     async def _domain_error(request: Request, exc: DomainError) -> JSONResponse:

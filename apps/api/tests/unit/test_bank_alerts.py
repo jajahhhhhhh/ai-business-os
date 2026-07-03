@@ -18,8 +18,7 @@ from src.domain.bank_alerts import (
 class TestOutgoingAlerts:
     def test_kbank_out_with_masked_account(self) -> None:
         alert = parse_alert(
-            "KBank แจ้งเตือน: เงินออกจากบัญชี X-1234 จำนวน 50,000.00 บาท "
-            "วันที่ 02/07/2569 14:30"
+            "KBank แจ้งเตือน: เงินออกจากบัญชี X-1234 จำนวน 50,000.00 บาท " "วันที่ 02/07/2569 14:30"
         )
         assert alert is not None
         assert alert.direction == "out"
@@ -36,9 +35,7 @@ class TestOutgoingAlerts:
         assert alert.account_tail == "5678"
 
     def test_scb_transfer_with_thb_label(self) -> None:
-        alert = parse_alert(
-            "SCB รายการโอนเงินสำเร็จ จาก บัญชี xxx-x-x9876 จำนวนเงิน (THB) 250,000.00"
-        )
+        alert = parse_alert("SCB รายการโอนเงินสำเร็จ จาก บัญชี xxx-x-x9876 จำนวนเงิน (THB) 250,000.00")
         assert alert is not None
         assert alert.direction == "out"
         assert alert.amount_thb == Decimal("250000.00")
@@ -90,9 +87,7 @@ class TestAmounts:
 
     def test_labelled_amount_wins_over_bare_baht_number(self) -> None:
         # The balance line must not be mistaken for the transaction amount.
-        alert = parse_alert(
-            "เงินออกจากบัญชี X-1234 จำนวนเงิน 500.00 บาท คงเหลือ 99,999.99 บาท"
-        )
+        alert = parse_alert("เงินออกจากบัญชี X-1234 จำนวนเงิน 500.00 บาท คงเหลือ 99,999.99 บาท")
         assert alert is not None
         assert alert.amount_thb == Decimal("500.00")
 

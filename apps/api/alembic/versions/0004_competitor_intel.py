@@ -1,10 +1,12 @@
 """M3 competitor intelligence: sources gain competitor linkage + sweep state.
 
 sources.competitor_id ties a monitored source to a competitor (nullable —
-generic lead sources have no competitor). last_fetched_at / last_status record
-the most recent sweep outcome per source ('ok'|'unchanged'|'changed'|
-'refused'|'error'). snapshots and change_events already exist (0001);
-competitors needs no changes (listing_urls_json, active, soft delete exist).
+generic lead sources have no competitor; ON DELETE CASCADE so removing a
+competitor removes its monitored sources). last_checked_at / last_status
+record the most recent sweep outcome per source ('baseline'|'unchanged'|
+'changed'|'blocked: <reason>'|'error: <detail>'). snapshots and change_events
+already exist (0001); competitors needs no changes (listing_urls_json,
+active, soft delete exist).
 
 Revision ID: 0004
 Revises: 0003
@@ -31,14 +33,14 @@ def upgrade() -> None:
         sa.Column(
             "competitor_id",
             _UUID,
-            sa.ForeignKey("competitors.id", ondelete="SET NULL"),
+            sa.ForeignKey("competitors.id", ondelete="CASCADE"),
             nullable=True,
         ),
     )
     op.add_column(
-        "sources", sa.Column("last_fetched_at", sa.DateTime(timezone=True), nullable=True)
+        "sources", sa.Column("last_checked_at", sa.DateTime(timezone=True), nullable=True)
     )
-    # ok|unchanged|changed|refused|error
+    # baseline|unchanged|changed|'blocked: <reason>'|'error: <detail>'
     op.add_column("sources", sa.Column("last_status", sa.Text(), nullable=True))
     op.create_index("ix_sources_competitor_id", "sources", ["competitor_id"])
 
@@ -46,5 +48,5 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_index("ix_sources_competitor_id", table_name="sources")
     op.drop_column("sources", "last_status")
-    op.drop_column("sources", "last_fetched_at")
+    op.drop_column("sources", "last_checked_at")
     op.drop_column("sources", "competitor_id")

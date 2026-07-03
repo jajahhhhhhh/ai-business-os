@@ -18,28 +18,41 @@ const KINDS: ReportKind[] = ["daily", "weekly", "monthly"];
 
 function ReportRow({ report }: { report: Report }) {
   return (
-    <li className="flex items-center gap-3 px-5 py-3">
-      <div className="rounded-xl bg-blue-50 p-2 text-blue-600">
-        <FileText size={16} />
+    <li className="px-5 py-3">
+      <div className="flex items-center gap-3">
+        <div className="rounded-xl bg-blue-50 p-2 text-blue-600">
+          <FileText size={16} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-slate-800">{report.period}</p>
+          <p className="text-xs text-slate-400">
+            สร้างเมื่อ {formatDateTimeTH(report.generated_at)}
+            {report.sent_at ? ` · ส่งทาง LINE แล้ว ${formatDateTimeTH(report.sent_at)}` : ""}
+          </p>
+        </div>
+        <Badge variant="outline">{report.lang.toUpperCase()}</Badge>
+        {report.sent_at ? (
+          <Badge variant="green">ส่งแล้ว</Badge>
+        ) : (
+          <Badge variant="neutral">ยังไม่ส่ง</Badge>
+        )}
+        {/* Download placeholder — enabled once report files are served from MinIO. */}
+        <Button variant="outline" disabled title="การดาวน์โหลดจะเปิดใช้เมื่อเชื่อมต่อที่เก็บไฟล์ (MinIO)">
+          <Download size={14} />
+          ดาวน์โหลด
+        </Button>
       </div>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium text-slate-800">{report.period}</p>
-        <p className="text-xs text-slate-400">
-          สร้างเมื่อ {formatDateTimeTH(report.generated_at)}
-          {report.sent_at ? ` · ส่งทาง LINE แล้ว ${formatDateTimeTH(report.sent_at)}` : ""}
-        </p>
-      </div>
-      <Badge variant="outline">{report.lang.toUpperCase()}</Badge>
-      {report.sent_at ? (
-        <Badge variant="green">ส่งแล้ว</Badge>
-      ) : (
-        <Badge variant="neutral">ยังไม่ส่ง</Badge>
+      {/* Inline Thai body — daily snapshots (M1) and weekly competitor reports (M3). */}
+      {report.body && (
+        <details className="mt-2 pl-12">
+          <summary className="cursor-pointer select-none text-xs font-medium text-blue-600 hover:underline">
+            อ่านรายงานฉบับเต็ม
+          </summary>
+          <pre className="mt-2 max-h-80 overflow-y-auto whitespace-pre-wrap rounded-xl bg-slate-50 p-3 font-sans text-xs leading-relaxed text-slate-700">
+            {report.body}
+          </pre>
+        </details>
       )}
-      {/* Download placeholder — enabled once report files are served from MinIO. */}
-      <Button variant="outline" disabled title="การดาวน์โหลดจะเปิดใช้เมื่อเชื่อมต่อที่เก็บไฟล์ (MinIO)">
-        <Download size={14} />
-        ดาวน์โหลด
-      </Button>
     </li>
   );
 }

@@ -147,9 +147,7 @@ class MemoryUseCases:
         fused = rrf_fuse([text_ids, semantic_ids])
         # Hydration re-checks expiry/consolidation: the vector index may still
         # hold points for rows that expired or were merged since indexing.
-        rows = await self._repo.get_active_many(
-            [uuid.UUID(mid) for mid, _ in fused], now
-        )
+        rows = await self._repo.get_active_many([uuid.UUID(mid) for mid, _ in fused], now)
         by_id = {str(row.id): row for row in rows}
         results: list[RecallHit] = []
         for memory_id, score in fused:
