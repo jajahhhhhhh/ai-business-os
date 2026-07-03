@@ -14,8 +14,7 @@ import {
   getSiteSummary,
   listAgentRuns,
   listBankTransactions,
-  listCompetitorChanges,
-  listCompetitors,
+  listChangeEvents,
   listLeads,
   listSites,
   safe,
@@ -47,17 +46,22 @@ function inMonth(iso: string, year: number, month: number): boolean {
   return date.getFullYear() === year && date.getMonth() === month;
 }
 
+/** ISO timestamp 7 days ago — the change-feed stat window. */
+function sevenDaysAgoIso(): string {
+  return new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+}
+
 export default async function OverviewPage() {
-  const [sites, leadsPage, runsPage, competitors, matchedTransactions] = await Promise.all([
+  const [sites, leadsPage, runsPage, changeEvents, matchedTransactions] = await Promise.all([
     safe(listSites()),
     safe(listLeads()),
     safe(listAgentRuns()),
-    safe(listCompetitors()),
+    safe(listChangeEvents({ since: sevenDaysAgoIso(), limit: 50 })),
     safe(listBankTransactions({ status: "matched" })),
   ]);
 
   // API fully unreachable → graceful fallback, never a crash.
-  if (!sites && !leadsPage && !runsPage && !competitors) {
+  if (!sites && !leadsPage && !runsPage && !changeEvents) {
     return (
       <div>
         <PageHeader title="ภาพรวม" subtitle="สัญญาณสำคัญของธุรกิจวันนี้ · Overview" />
@@ -72,16 +76,14 @@ export default async function OverviewPage() {
       )
     : [];
 
-  const changeCount = competitors
-    ? (await Promise.all(competitors.map((c) => safe(listCompetitorChanges(c.id))))).reduce(
-        (acc, list) => {
-          if (!list) return acc;
-          acc.total += list.length;
-          acc.high += list.filter((ch) => ch.severity === "high" || ch.severity === "critical").length;
-          return acc;
-        },
-        { total: 0, high: 0 },
-      )
+  // Global change-events endpoint (7-day window), no per-competitor fan-out.
+  const changeCount = changeEvents
+    ? {
+        total: changeEvents.length,
+        high: changeEvents.filter(
+          (event) => event.severity === "high" || event.severity === "critical",
+        ).length,
+      }
     : { total: 0, high: 0 };
 
   const allDraws = summaries.flatMap((summary) => summary.draws);
@@ -158,12 +160,14 @@ export default async function OverviewPage() {
           icon={UserPlus}
           hint="สถานะค้นพบใหม่"
         />
-        <StatCard
-          title="ความเคลื่อนไหวคู่แข่ง"
-          value={String(changeCount.total)}
-          icon={Radar}
-          hint={`${changeCount.high} รายการระดับสูงขึ้นไป`}
-        />
+        <Link href="/competitors" className="block" title="ไปที่คู่แข่ง">
+          <StatCard
+            title="ความเคลื่อนไหวคู่แข่ง"
+            value={String(changeCount.total)}
+            icon={Radar}
+            hint={`7 วันล่าสุด · ${changeCount.high} รายการระดับสูงขึ้นไป`}
+          />
+        </Link>
         <StatCard
           title="เอเจนต์ล้มเหลว"
           value={String(failedRuns)}

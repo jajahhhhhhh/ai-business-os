@@ -8,7 +8,9 @@ import type {
   AgentRunStatus,
   BankTransactionDirection,
   BankTransactionStatus,
+  ChangeCategory,
   ChangeSeverity,
+  CompetitorKind,
   DrawRowStatus,
   DrawStatus,
   KbDocumentStatus,
@@ -17,6 +19,8 @@ import type {
   LeadStage,
   MilestoneStatus,
   ReportKind,
+  SourceFetchStatus,
+  SourceType,
 } from "./types";
 
 export type Locale = "th" | "en";
@@ -72,6 +76,54 @@ export const SEVERITY_LABELS: Record<ChangeSeverity, LocalizedText> = {
   high: { th: "สูง", en: "High" },
   critical: { th: "วิกฤต", en: "Critical" },
 };
+
+/** Change-event categories — `baseline` = first snapshot of a competitor. */
+export const CHANGE_CATEGORY_LABELS: Record<ChangeCategory, LocalizedText> = {
+  baseline: { th: "เริ่มติดตาม", en: "Baseline" },
+  pricing: { th: "ราคา", en: "Pricing" },
+  promotion: { th: "โปรโมชัน", en: "Promotion" },
+  content: { th: "เนื้อหา", en: "Content" },
+  availability: { th: "ห้องว่าง", en: "Availability" },
+  reviews: { th: "รีวิว", en: "Reviews" },
+  other: { th: "อื่น ๆ", en: "Other" },
+};
+
+export const SOURCE_TYPE_LABELS: Record<SourceType, LocalizedText> = {
+  website: { th: "เว็บไซต์", en: "Website" },
+  rss: { th: "RSS", en: "RSS" },
+  sitemap: { th: "แผนผังเว็บ", en: "Sitemap" },
+};
+
+/** Outcome of the collector's last fetch of a source. */
+export const SOURCE_STATUS_LABELS: Record<SourceFetchStatus, LocalizedText> = {
+  ok: { th: "ปกติ", en: "OK" },
+  unchanged: { th: "ไม่เปลี่ยนแปลง", en: "Unchanged" },
+  changed: { th: "พบการเปลี่ยนแปลง", en: "Changed" },
+  refused: { th: "ถูกปฏิเสธ", en: "Refused" },
+  error: { th: "ผิดพลาด", en: "Error" },
+};
+
+/** Competitor kinds offered by the create form (API stores a free string). */
+export const COMPETITOR_KIND_LABELS: Record<CompetitorKind, LocalizedText> = {
+  villa: { th: "วิลล่า", en: "Villa" },
+  hotel: { th: "โรงแรม", en: "Hotel" },
+  aspirational: { th: "แบรนด์ต้นแบบ", en: "Aspirational brand" },
+  other: { th: "อื่น ๆ", en: "Other" },
+};
+
+function isCompetitorKind(value: string): value is CompetitorKind {
+  return value in COMPETITOR_KIND_LABELS;
+}
+
+/** Thai label for a competitor kind (free string, nullable); falls back to the raw value. */
+export function competitorKindLabel(
+  kind: string | null,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  if (!kind) return locale === "th" ? "ไม่ระบุ" : "Unspecified";
+  const slug = kind.toLowerCase();
+  return isCompetitorKind(slug) ? COMPETITOR_KIND_LABELS[slug][locale] : kind;
+}
 
 export const DRAW_STATUS_LABELS: Record<DrawStatus, LocalizedText> = {
   requested: { th: "ขอเบิก", en: "Requested" },

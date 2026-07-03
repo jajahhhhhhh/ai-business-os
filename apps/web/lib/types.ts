@@ -295,26 +295,124 @@ export interface LeadListParams {
 }
 
 // ---------------------------------------------------------------------------
-// Competitor intelligence
+// Competitor intelligence (M3) — registry, sources, change events
 // ---------------------------------------------------------------------------
 
+/**
+ * Known competitor kinds. The API stores `kind` as a free string — this union
+ * is the UI vocabulary offered by the create form (see COMPETITOR_KIND_LABELS).
+ */
+export type CompetitorKind = "villa" | "hotel" | "aspirational" | "other";
+
+/** GET /v1/competitors list item · POST/PATCH response body. */
 export interface Competitor {
   id: string;
   name: string;
-  kind: string;
-  website: string;
+  kind: string | null;
+  website: string | null;
   active: boolean;
+  created_at: string;
+  sources_count: number;
+  last_change_at: string | null;
+}
+
+/** POST /v1/competitors */
+export interface CompetitorCreate {
+  name: string;
+  kind?: string;
+  website?: string;
+}
+
+/** PATCH /v1/competitors/{id} — all fields optional. */
+export interface CompetitorPatch {
+  name?: string;
+  kind?: string;
+  website?: string;
+  active?: boolean;
 }
 
 export type ChangeSeverity = "low" | "medium" | "high" | "critical";
 
-export interface CompetitorChange {
+export type ChangeCategory =
+  | "baseline"
+  | "pricing"
+  | "promotion"
+  | "content"
+  | "availability"
+  | "reviews"
+  | "other";
+
+/** GET /v1/change-events — newest first, competitor name denormalized in. */
+export interface ChangeEventRow {
   id: string;
   competitor_id: string;
-  category: string;
+  competitor_name: string;
+  category: ChangeCategory;
   summary: string;
   severity: ChangeSeverity;
   detected_at: string;
+}
+
+export interface ChangeEventListParams {
+  severity?: ChangeSeverity;
+  competitor_id?: string;
+  /** ISO-8601 lower bound on detected_at. */
+  since?: string;
+  limit?: number;
+}
+
+export type SourceType = "website" | "rss" | "sitemap";
+
+/** Outcome of the collector's last fetch of a source. */
+export type SourceFetchStatus = "ok" | "unchanged" | "changed" | "refused" | "error";
+
+/** GET /v1/sources list item · POST/PATCH response body. */
+export interface Source {
+  id: string;
+  name: string;
+  type: SourceType;
+  url: string;
+  /** ToS policy verdict recorded by the compliance gate (compliance.py). */
+  tos_policy: string;
+  enabled: boolean;
+  competitor_id: string | null;
+  competitor_name: string | null;
+  rate_limit_per_hr: number;
+  last_fetched_at: string | null;
+  last_status: SourceFetchStatus | null;
+}
+
+export interface SourceListParams {
+  competitor_id?: string;
+}
+
+/**
+ * POST /v1/sources — responds 422 problem+json when the URL is ToS-prohibited
+ * (e.g. facebook.com, airbnb); the detail is shown inline as the compliance gate.
+ */
+export interface SourceCreate {
+  name: string;
+  type: SourceType;
+  url: string;
+  competitor_id?: string;
+  rate_limit_per_hr?: number;
+}
+
+/** POST /v1/competitors/{id}:sweep → 202 accepted. */
+export interface SweepResponse {
+  dispatched: boolean;
+  detail: string;
+}
+
+/** POST /v1/reports/weekly-competitor:generate → 201. */
+export interface WeeklyCompetitorReport {
+  id: string;
+  kind: string;
+  period: string;
+  lang: string;
+  body: string;
+  line_sent: boolean;
+  created_at: string;
 }
 
 // ---------------------------------------------------------------------------

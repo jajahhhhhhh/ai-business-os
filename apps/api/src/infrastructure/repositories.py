@@ -35,6 +35,8 @@ from src.infrastructure.models import (
     Quotation,
     Report,
     Site,
+    Snapshot,
+    Source,
 )
 
 

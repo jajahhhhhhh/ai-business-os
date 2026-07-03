@@ -13,8 +13,11 @@ import type {
   BankAlertIngest,
   BankTransaction,
   BankTransactionListParams,
+  ChangeEventListParams,
+  ChangeEventRow,
   Competitor,
-  CompetitorChange,
+  CompetitorCreate,
+  CompetitorPatch,
   Contractor,
   ContractorCreate,
   DailySnapshot,
@@ -41,6 +44,11 @@ import type {
   ReportListParams,
   Site,
   SiteSummary,
+  Source,
+  SourceCreate,
+  SourceListParams,
+  SweepResponse,
+  WeeklyCompetitorReport,
 } from "./types";
 
 const DEFAULT_BASE_URL = "http://localhost:8000";
@@ -219,16 +227,6 @@ export function listCompetitors(): Promise<Competitor[]> {
   return get<Competitor[]>("/competitors");
 }
 
-export function listCompetitorChanges(
-  competitorId: string,
-  since?: string,
-): Promise<CompetitorChange[]> {
-  return get<CompetitorChange[]>(
-    `/competitors/${encodeURIComponent(competitorId)}/changes`,
-    { since },
-  );
-}
-
 export async function listAgentRuns(
   params: AgentRunListParams = {},
 ): Promise<Paginated<AgentRun>> {
@@ -390,4 +388,62 @@ export function uploadKbDocument(payload: KbDocumentUpload): Promise<KbDocument>
   if (title) form.append("title", title);
   if (payload.lang) form.append("lang", payload.lang);
   return uploadForm<KbDocument>("/kb/documents", form);
+}
+
+// ---------------------------------------------------------------------------
+// Competitor intelligence (M3) — reads for server components + client filters
+// ---------------------------------------------------------------------------
+
+/** GET /v1/change-events — newest first. */
+export function listChangeEvents(
+  params: ChangeEventListParams = {},
+): Promise<ChangeEventRow[]> {
+  return get<ChangeEventRow[]>("/change-events", {
+    severity: params.severity,
+    competitor_id: params.competitor_id,
+    since: params.since,
+    limit: params.limit,
+  });
+}
+
+/** GET /v1/sources — optionally scoped to one competitor. */
+export function listSources(params: SourceListParams = {}): Promise<Source[]> {
+  return get<Source[]>("/sources", { competitor_id: params.competitor_id });
+}
+
+// ---------------------------------------------------------------------------
+// Competitor intelligence (M3) — mutations for `use client` components.
+// All throw ApiError with a display-ready problem+json detail.
+// ---------------------------------------------------------------------------
+
+export function createCompetitor(payload: CompetitorCreate): Promise<Competitor> {
+  return mutate<Competitor>("POST", "/competitors", payload);
+}
+
+export function updateCompetitor(
+  id: string,
+  payload: CompetitorPatch,
+): Promise<Competitor> {
+  return mutate<Competitor>("PATCH", `/competitors/${encodeURIComponent(id)}`, payload);
+}
+
+/**
+ * POST /v1/sources — 422 ApiError carries the ToS compliance-gate detail,
+ * rendered inline by the source form (amber note, not a generic error).
+ */
+export function createSource(payload: SourceCreate): Promise<Source> {
+  return mutate<Source>("POST", "/sources", payload);
+}
+
+export function updateSourceEnabled(id: string, enabled: boolean): Promise<Source> {
+  return mutate<Source>("PATCH", `/sources/${encodeURIComponent(id)}`, { enabled });
+}
+
+/** POST /v1/competitors/{id}:sweep → 202 { dispatched, detail }. */
+export function sweepCompetitor(id: string): Promise<SweepResponse> {
+  return mutate<SweepResponse>("POST", `/competitors/${encodeURIComponent(id)}:sweep`);
+}
+
+export function generateWeeklyCompetitorReport(): Promise<WeeklyCompetitorReport> {
+  return mutate<WeeklyCompetitorReport>("POST", "/reports/weekly-competitor:generate");
 }

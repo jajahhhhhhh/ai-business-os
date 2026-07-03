@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from src.application.errors import EmptyDocumentError, UnsupportedDocumentError
 from src.application.kb import KB_COLLECTION, SNIPPET_CHARS, KnowledgeBaseUseCases
-from src.application.ports import ParseResult
+from src.application.ports import ParseResult, TextExtractor, VectorIndex
+from src.application.repositories import DocumentRow
 from tests.fakes import (
     BrokenVectorIndex,
     FakeEmbedder,
@@ -24,9 +27,9 @@ THAI_TEXT = "ใบเสนอราคางานไฟฟ้า วิลล
 def make_use_cases(
     *,
     embedder: FakeEmbedder | None = None,
-    vector_index=None,
-    extract=fake_extract,
-) -> tuple[KnowledgeBaseUseCases, FakeKnowledgeBaseRepository, InMemoryKeywordIndex, object]:
+    vector_index: VectorIndex | None = None,
+    extract: TextExtractor = fake_extract,
+) -> tuple[KnowledgeBaseUseCases, FakeKnowledgeBaseRepository, InMemoryKeywordIndex, Any]:
     repo = FakeKnowledgeBaseRepository()
     keyword = InMemoryKeywordIndex()
     vector = vector_index if vector_index is not None else InMemoryVectorIndex()
@@ -42,7 +45,9 @@ def make_use_cases(
     return use_cases, repo, keyword, vector
 
 
-async def ingest_and_process(use_cases: KnowledgeBaseUseCases, text: str, title: str):
+async def ingest_and_process(
+    use_cases: KnowledgeBaseUseCases, text: str, title: str
+) -> DocumentRow:
     document = await use_cases.ingest_document(
         data=text.encode("utf-8"),
         filename=f"{title}.txt",

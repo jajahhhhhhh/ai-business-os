@@ -290,6 +290,146 @@ class LeadRow(Protocol):
     def created_at(self) -> datetime: ...
 
 
+# ---------------------------------------------------------- M3 competitor intel
+
+
+class CompetitorRow(Protocol):
+    @property
+    def id(self) -> uuid.UUID: ...
+    @property
+    def name(self) -> str: ...
+    @property
+    def active(self) -> bool: ...
+
+
+class SourceRow(Protocol):
+    @property
+    def id(self) -> uuid.UUID: ...
+    @property
+    def name(self) -> str: ...
+    @property
+    def type(self) -> str: ...
+    @property
+    def url(self) -> str | None: ...
+    @property
+    def tos_policy(self) -> str: ...
+    @property
+    def rate_limit_per_hr(self) -> int: ...
+    @property
+    def enabled(self) -> bool: ...
+    @property
+    def competitor_id(self) -> uuid.UUID | None: ...
+    @property
+    def last_fetched_at(self) -> datetime | None: ...
+    @property
+    def last_status(self) -> str | None: ...
+
+
+class SourceDisplayRow(SourceRow, Protocol):
+    """A source joined with its competitor's name (null-safe outer join)."""
+
+    @property
+    def competitor_name(self) -> str | None: ...
+
+
+class SnapshotRow(Protocol):
+    @property
+    def id(self) -> uuid.UUID: ...
+    @property
+    def competitor_id(self) -> uuid.UUID: ...
+    @property
+    def source_id(self) -> uuid.UUID | None: ...
+    @property
+    def captured_at(self) -> datetime: ...
+    @property
+    def content_hash(self) -> str: ...
+    @property
+    def storage_key(self) -> str: ...
+
+
+class ChangeEventCreatedRow(Protocol):
+    @property
+    def id(self) -> uuid.UUID: ...
+    @property
+    def category(self) -> str: ...
+    @property
+    def severity(self) -> str: ...
+
+
+class ChangeEventDisplayRow(Protocol):
+    """A change event joined with its competitor's name, for feeds/reports."""
+
+    @property
+    def id(self) -> uuid.UUID: ...
+    @property
+    def competitor_id(self) -> uuid.UUID: ...
+    @property
+    def competitor_name(self) -> str: ...
+    @property
+    def category(self) -> str: ...
+    @property
+    def summary(self) -> str: ...
+    @property
+    def severity(self) -> str: ...
+    @property
+    def detected_at(self) -> datetime: ...
+
+
+class CompetitorIntelRepository(Protocol):
+    async def get_competitor(self, competitor_id: uuid.UUID) -> CompetitorRow | None: ...
+    async def create_source(
+        self,
+        *,
+        name: str,
+        type: str,  # noqa: A002 - mirrors the column name
+        url: str,
+        competitor_id: uuid.UUID | None,
+        rate_limit_per_hr: int,
+        tos_policy: str,
+        robots_ok: bool,
+        enabled: bool,
+    ) -> SourceRow: ...
+    async def get_source(self, source_id: uuid.UUID) -> SourceRow | None: ...
+    async def list_sources(
+        self, competitor_id: uuid.UUID | None
+    ) -> Sequence[SourceDisplayRow]: ...
+    async def sweep_sources(
+        self, competitor_id: uuid.UUID | None
+    ) -> Sequence[SourceDisplayRow]:
+        """Enabled competitor-linked sources of active competitors."""
+        ...
+
+    async def set_source_result(
+        self, source_id: uuid.UUID, status: str, fetched_at: datetime | None
+    ) -> None: ...
+    async def latest_snapshot(
+        self, competitor_id: uuid.UUID, source_id: uuid.UUID
+    ) -> SnapshotRow | None: ...
+    async def create_snapshot(
+        self,
+        *,
+        competitor_id: uuid.UUID,
+        source_id: uuid.UUID,
+        content_hash: str,
+        storage_key: str,
+    ) -> SnapshotRow: ...
+    async def create_change_event(
+        self,
+        *,
+        competitor_id: uuid.UUID,
+        snapshot_id: uuid.UUID | None,
+        category: str,
+        summary: str,
+        severity: str,
+    ) -> ChangeEventCreatedRow: ...
+    async def change_events_since(
+        self, since: datetime
+    ) -> Sequence[ChangeEventDisplayRow]: ...
+    async def create_report(
+        self, *, kind: str, period: str, lang: str, body: str, sent_at: datetime | None
+    ) -> ReportRow: ...
+
+
 # ------------------------------------------------------------------ repositories
 
 

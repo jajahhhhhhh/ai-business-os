@@ -12,7 +12,11 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from src.application.errors import NotFoundError, UnrecognizedBankAlertError
+from src.application.errors import (
+    ComplianceRefusedError,
+    NotFoundError,
+    UnrecognizedBankAlertError,
+)
 from src.domain.errors import (
     BankTransactionRuleError,
     CurrencyMismatchError,
@@ -97,6 +101,14 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(NotFoundError)
     async def _not_found(request: Request, exc: NotFoundError) -> JSONResponse:
         return problem_response(request, status=404, title="Not Found", detail=str(exc))
+
+    @app.exception_handler(ComplianceRefusedError)
+    async def _compliance_refused(
+        request: Request, exc: ComplianceRefusedError
+    ) -> JSONResponse:
+        return problem_response(
+            request, status=422, title="Unprocessable Entity", detail=str(exc)
+        )
 
     @app.exception_handler(UnrecognizedBankAlertError)
     async def _unrecognized_alert(

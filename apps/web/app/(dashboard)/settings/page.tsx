@@ -1,107 +1,84 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { CalendarClock, ShieldCheck } from "lucide-react";
 import { DataTable } from "@/components/DataTable";
 import type { Column } from "@/components/DataTable";
 import { PageHeader } from "@/components/PageHeader";
 import { Badge } from "@/components/ui/Badge";
+import type { BadgeVariant } from "@/components/ui/Badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/Card";
-import { listJobs, safe } from "@/lib/api";
+import { listJobs, listSources, safe } from "@/lib/api";
 import { formatDateTimeTH } from "@/lib/format";
-import type { Job } from "@/lib/types";
+import { SOURCE_STATUS_LABELS, SOURCE_TYPE_LABELS } from "@/lib/i18n";
+import type { Job, Source, SourceFetchStatus } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = { title: "ตั้งค่า" };
 
+const SOURCE_STATUS_BADGE: Record<SourceFetchStatus, BadgeVariant> = {
+  ok: "green",
+  unchanged: "neutral",
+  changed: "blue",
+  refused: "amber",
+  error: "red",
+};
+
 /**
- * Sources registry concept — mirrors the ToS policy matrix in
- * docs/ARCHITECTURE.md §8.4. Read-only for now; will be served by
- * GET /v1/sources once the collector registry lands in the API.
+ * Live sources registry from GET /v1/sources — read-only here; management
+ * (add/toggle) lives on the competitors page. Every row shown already passed
+ * the ToS compliance gate (compliance.py) at creation time, hence the ✅.
  */
-interface SourceConcept {
-  name: string;
-  type: string;
-  policy: "allowed" | "restricted";
-  policyNote: string;
-  enabled: boolean;
-}
-
-const SOURCE_REGISTRY: SourceConcept[] = [
-  {
-    name: "Reddit (r/kohsamui, r/Thailand)",
-    type: "API ทางการ",
-    policy: "allowed",
-    policyNote: "ใช้ OAuth API ตามเงื่อนไข + จำกัดอัตราเรียก",
-    enabled: true,
-  },
-  {
-    name: "RSS / บล็อกท่องเที่ยว",
-    type: "ฟีด / HTTP",
-    policy: "allowed",
-    policyNote: "เคารพ robots.txt และแคช",
-    enabled: true,
-  },
-  {
-    name: "Google Places API",
-    type: "API ทางการ (เสียเงิน)",
-    policy: "allowed",
-    policyNote: "ห้าม scrape SERP — ใช้ API เท่านั้น",
-    enabled: true,
-  },
-  {
-    name: "จดหมายข่าวคู่แข่ง (Gmail)",
-    type: "อีเมล",
-    policy: "allowed",
-    policyNote: "สมัครรับอย่างถูกต้อง แล้ว parse จากกล่องจดหมาย",
-    enabled: true,
-  },
-  {
-    name: "Facebook Pages / Groups",
-    type: "นำเข้าเอง",
-    policy: "restricted",
-    policyNote: "ToS ห้าม scrape — ใช้ Graph API ของเพจตัวเอง หรือเจ้าของส่งต่อเท่านั้น",
-    enabled: false,
-  },
-  {
-    name: "Airbnb / Booking / Agoda",
-    type: "ข้อมูลผู้ให้บริการ",
-    policy: "restricted",
-    policyNote: "ห้าม scrape — ใช้ API ลิสติ้งตัวเอง หรือข้อมูลตลาดแบบมีสัญญา (AirDNA)",
-    enabled: false,
-  },
-];
-
-const SOURCE_COLUMNS: Column<SourceConcept>[] = [
+const SOURCE_COLUMNS: Column<Source>[] = [
   {
     key: "name",
     header: "แหล่งข้อมูล",
     render: (source) => (
-      <div className="min-w-0">
-        <p className="font-medium text-slate-900">{source.name}</p>
-        <p className="mt-0.5 text-xs text-slate-400">{source.policyNote}</p>
+      <div className="min-w-0 max-w-[18rem]">
+        <p className="truncate font-medium text-slate-900">{source.name}</p>
+        <p className="mt-0.5 truncate text-xs text-slate-400" title={source.url}>
+          {source.url}
+          {source.competitor_name ? ` · ${source.competitor_name}` : ""}
+        </p>
       </div>
     ),
   },
   {
     key: "type",
     header: "ประเภท",
-    render: (source) => <Badge variant="outline">{source.type}</Badge>,
+    render: (source) => <Badge variant="outline">{SOURCE_TYPE_LABELS[source.type].th}</Badge>,
   },
   {
     key: "policy",
     header: "นโยบาย ToS",
-    render: (source) =>
-      source.policy === "allowed" ? (
+    render: (source) => (
+      <span title={source.tos_policy}>
         <Badge variant="green">✅ อนุญาต</Badge>
+      </span>
+    ),
+  },
+  {
+    key: "last_status",
+    header: "ผลการดึงล่าสุด",
+    render: (source) =>
+      source.last_status ? (
+        <div>
+          <Badge variant={SOURCE_STATUS_BADGE[source.last_status]}>
+            {SOURCE_STATUS_LABELS[source.last_status].th}
+          </Badge>
+          <p className="mt-1 whitespace-nowrap text-xs text-slate-400">
+            {formatDateTimeTH(source.last_fetched_at)}
+          </p>
+        </div>
       ) : (
-        <Badge variant="amber">⚠️ จำกัด</Badge>
+        <Badge variant="outline">ยังไม่เคยดึง</Badge>
       ),
   },
   {
     key: "enabled",
     header: "เปิดใช้งาน",
     render: (source) => (
-      // Read-only visual toggle — editing arrives with the sources API.
+      // Read-only visual switch — toggling lives on the competitors page.
       <span
         role="img"
         aria-label={source.enabled ? "เปิดใช้งาน" : "ปิดใช้งาน"}
@@ -114,6 +91,24 @@ const SOURCE_COLUMNS: Column<SourceConcept>[] = [
     ),
   },
 ];
+
+function SourcesTable({ sources }: { sources: Source[] | null }) {
+  if (!sources) {
+    return (
+      <p className="py-6 text-center text-sm text-slate-400">
+        API ยังไม่เชื่อมต่อ — แสดงทะเบียนแหล่งข้อมูลไม่ได้
+      </p>
+    );
+  }
+  return (
+    <DataTable
+      columns={SOURCE_COLUMNS}
+      rows={sources}
+      rowKey={(source) => source.id}
+      emptyText="ยังไม่มีแหล่งข้อมูลในระบบ — เพิ่มได้ที่หน้าคู่แข่ง"
+    />
+  );
+}
 
 function ScheduleList({ jobs }: { jobs: Job[] | null }) {
   if (!jobs) {
@@ -160,7 +155,7 @@ function ScheduleList({ jobs }: { jobs: Job[] | null }) {
 }
 
 export default async function SettingsPage() {
-  const jobs = await safe(listJobs());
+  const [jobs, sources] = await Promise.all([safe(listJobs()), safe(listSources())]);
 
   return (
     <div>
@@ -172,17 +167,21 @@ export default async function SettingsPage() {
             title="ทะเบียนแหล่งข้อมูล"
             subtitle="Sources registry — นโยบาย ToS บังคับใช้ในโค้ด (compliance.py) ไม่ใช่แค่ข้อตกลง"
             action={
-              <Badge variant="blue" className="gap-1">
-                <ShieldCheck size={13} /> PDPA
-              </Badge>
+              <div className="flex items-center gap-2">
+                <Badge variant="blue" className="gap-1">
+                  <ShieldCheck size={13} /> PDPA
+                </Badge>
+                <Link
+                  href="/competitors"
+                  className="whitespace-nowrap text-xs font-medium text-blue-600 hover:underline"
+                >
+                  จัดการที่หน้าคู่แข่ง
+                </Link>
+              </div>
             }
           />
           <CardContent>
-            <DataTable
-              columns={SOURCE_COLUMNS}
-              rows={SOURCE_REGISTRY}
-              rowKey={(source) => source.name}
-            />
+            <SourcesTable sources={sources} />
           </CardContent>
         </Card>
 

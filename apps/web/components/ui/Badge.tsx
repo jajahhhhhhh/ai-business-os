@@ -5,6 +5,7 @@ const VARIANTS = {
   blue: "bg-blue-50 text-blue-700",
   green: "bg-emerald-50 text-emerald-700",
   amber: "bg-amber-50 text-amber-700",
+  orange: "bg-orange-50 text-orange-700",
   red: "bg-rose-50 text-rose-700",
   outline: "border border-slate-200 bg-white text-slate-600",
 } as const;

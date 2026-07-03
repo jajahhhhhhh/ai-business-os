@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 
 from src.application.memory import MEMORY_COLLECTION, MemoryUseCases
+from src.application.ports import VectorIndex
 from src.domain.errors import InvalidImportanceError
 from tests.fakes import (
     BrokenVectorIndex,
@@ -18,8 +20,8 @@ from tests.fakes import (
 
 
 def make_use_cases(
-    *, embedder: FakeEmbedder | None = None, vector_index=None
-) -> tuple[MemoryUseCases, FakeMemoryRepository, object]:
+    *, embedder: FakeEmbedder | None = None, vector_index: VectorIndex | None = None
+) -> tuple[MemoryUseCases, FakeMemoryRepository, Any]:
     repo = FakeMemoryRepository()
     vector = vector_index if vector_index is not None else InMemoryVectorIndex()
     use_cases = MemoryUseCases(

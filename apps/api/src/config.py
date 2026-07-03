@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
 from functools import lru_cache
 from typing import Literal
 
@@ -36,6 +37,13 @@ class Settings(BaseSettings):
     # Knowledge base (M2).
     embedding_model: str = "BAAI/bge-m3"
     kb_max_upload_mb: int = 25
+
+    # LLM (M3 competitor intel; generalized in M4).
+    llm_model_low: str = "claude-haiku-4-5-20251001"
+    llm_model_high: str = "claude-sonnet-4-6"
+    # Hard daily spend cap across all agents; at/over -> LLM calls return None
+    # and callers fall back to rule-based paths. Env: LLM_DAILY_BUDGET_USD.
+    llm_daily_budget_usd: Decimal = Decimal("5.00")
 
     # Secrets: default empty; access through `require()` when actually needed.
     meili_master_key: str = ""

@@ -76,6 +76,25 @@ export function formatDateTimeTH(iso: string | null | undefined): string {
   return date ? DATE_TIME.format(date) : "—";
 }
 
+const RELATIVE_TH = new Intl.RelativeTimeFormat("th-TH", { numeric: "always" });
+
+/**
+ * Thai relative time for recent events, e.g. "5 นาทีที่ผ่านมา" / "3 ชั่วโมงที่ผ่านมา";
+ * beyond 7 days falls back to the short Buddhist-calendar date. null → "—".
+ */
+export function formatRelativeTH(iso: string | null | undefined): string {
+  const date = parseDate(iso);
+  if (!date) return "—";
+  const minutes = Math.round((Date.now() - date.getTime()) / 60_000);
+  if (minutes < 1) return "เมื่อสักครู่";
+  if (minutes < 60) return RELATIVE_TH.format(-minutes, "minute");
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return RELATIVE_TH.format(-hours, "hour");
+  const days = Math.round(hours / 24);
+  if (days <= 7) return RELATIVE_TH.format(-days, "day");
+  return DATE_SHORT.format(date);
+}
+
 /** File size in B / KB / MB, e.g. "812 KB", "2.4 MB"; null → "—". */
 export function formatBytes(bytes: number | null | undefined): string {
   if (bytes === null || bytes === undefined || bytes < 0) return "—";

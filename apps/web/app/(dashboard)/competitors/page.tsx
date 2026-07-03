@@ -1,137 +1,271 @@
 import type { Metadata } from "next";
-import { Globe } from "lucide-react";
+import { ExternalLink } from "lucide-react";
+import { ChangeFeed } from "@/components/competitors/ChangeFeed";
+import { CompetitorActiveToggle } from "@/components/competitors/CompetitorActiveToggle";
+import { CompetitorCreateForm } from "@/components/competitors/CompetitorCreateForm";
+import { SourceCreateForm } from "@/components/competitors/SourceCreateForm";
+import { SourceEnabledToggle } from "@/components/competitors/SourceEnabledToggle";
+import { SweepButton } from "@/components/competitors/SweepButton";
+import { WeeklyReportButton } from "@/components/competitors/WeeklyReportButton";
+import { DataTable } from "@/components/DataTable";
+import type { Column } from "@/components/DataTable";
 import { EmptyState } from "@/components/EmptyState";
 import { PageHeader } from "@/components/PageHeader";
 import { Badge } from "@/components/ui/Badge";
 import type { BadgeVariant } from "@/components/ui/Badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/Card";
-import { listCompetitorChanges, listCompetitors, safe } from "@/lib/api";
-import { formatDateTimeTH, formatNumber } from "@/lib/format";
-import { SEVERITY_LABELS } from "@/lib/i18n";
-import type { ChangeSeverity, CompetitorChange } from "@/lib/types";
+import { listChangeEvents, listCompetitors, listSources, safe } from "@/lib/api";
+import { formatDateTimeTH, formatNumber, formatRelativeTH } from "@/lib/format";
+import { competitorKindLabel, SOURCE_STATUS_LABELS, SOURCE_TYPE_LABELS } from "@/lib/i18n";
+import type { Competitor, Source, SourceFetchStatus } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = { title: "คู่แข่ง" };
 
-const SEVERITY_BADGE: Record<ChangeSeverity, BadgeVariant> = {
-  low: "neutral",
-  medium: "blue",
-  high: "amber",
-  critical: "red",
+const FEED_LIMIT = 50;
+
+const SOURCE_STATUS_BADGE: Record<SourceFetchStatus, BadgeVariant> = {
+  ok: "green",
+  unchanged: "neutral",
+  changed: "blue",
+  refused: "amber",
+  error: "red",
 };
 
-interface FeedEntry {
-  change: CompetitorChange;
-  competitorName: string;
+/** Hostname + path without the scheme — keeps long URLs scannable in a cell. */
+function displayUrl(url: string): string {
+  return url.replace(/^https?:\/\//, "").replace(/\/$/, "");
 }
 
-export default async function CompetitorsPage() {
-  const competitors = await safe(listCompetitors());
+const COMPETITOR_COLUMNS: Column<Competitor>[] = [
+  {
+    key: "name",
+    header: "คู่แข่ง",
+    render: (competitor) => (
+      <div className="min-w-0 max-w-[16rem]">
+        <p className="truncate font-medium text-slate-900">{competitor.name}</p>
+        {competitor.website ? (
+          <a
+            href={competitor.website}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={competitor.website}
+            className="mt-0.5 inline-flex max-w-full items-center gap-1 text-xs text-slate-400 transition-colors hover:text-blue-600"
+          >
+            <span className="truncate">{displayUrl(competitor.website)}</span>
+            <ExternalLink size={12} className="shrink-0" />
+          </a>
+        ) : (
+          <p className="mt-0.5 text-xs text-slate-300">ไม่มีเว็บไซต์</p>
+        )}
+      </div>
+    ),
+  },
+  {
+    key: "kind",
+    header: "ประเภท",
+    render: (competitor) => (
+      <Badge variant="outline">{competitorKindLabel(competitor.kind)}</Badge>
+    ),
+  },
+  {
+    key: "sources",
+    header: "แหล่งข้อมูล",
+    render: (competitor) => (
+      <span className="whitespace-nowrap text-slate-500">
+        {formatNumber(competitor.sources_count)} แหล่งข้อมูล
+      </span>
+    ),
+  },
+  {
+    key: "last_change",
+    header: "เปลี่ยนแปลงล่าสุด",
+    render: (competitor) => (
+      <span
+        className="whitespace-nowrap text-slate-500"
+        title={
+          competitor.last_change_at ? formatDateTimeTH(competitor.last_change_at) : undefined
+        }
+      >
+        {competitor.last_change_at
+          ? formatRelativeTH(competitor.last_change_at)
+          : "ยังไม่พบ"}
+      </span>
+    ),
+  },
+  {
+    key: "active",
+    header: "ติดตาม",
+    render: (competitor) => (
+      <CompetitorActiveToggle
+        competitorId={competitor.id}
+        active={competitor.active}
+        name={competitor.name}
+      />
+    ),
+  },
+  {
+    key: "actions",
+    header: "",
+    render: (competitor) => <SweepButton competitorId={competitor.id} />,
+  },
+];
 
-  if (!competitors) {
+const SOURCE_COLUMNS: Column<Source>[] = [
+  {
+    key: "name",
+    header: "แหล่งข้อมูล",
+    render: (source) => (
+      <div className="min-w-0 max-w-[16rem]">
+        <p className="truncate font-medium text-slate-900">{source.name}</p>
+        <a
+          href={source.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          title={source.url}
+          className="mt-0.5 inline-flex max-w-full items-center gap-1 text-xs text-slate-400 transition-colors hover:text-blue-600"
+        >
+          <span className="truncate">{displayUrl(source.url)}</span>
+          <ExternalLink size={12} className="shrink-0" />
+        </a>
+      </div>
+    ),
+  },
+  {
+    key: "type",
+    header: "ประเภท",
+    render: (source) => <Badge variant="outline">{SOURCE_TYPE_LABELS[source.type].th}</Badge>,
+  },
+  {
+    key: "competitor",
+    header: "คู่แข่ง",
+    render: (source) => (
+      <span className="whitespace-nowrap text-slate-500">
+        {source.competitor_name ?? "ไม่ระบุ"}
+      </span>
+    ),
+  },
+  {
+    key: "last_status",
+    header: "ผลการดึงล่าสุด",
+    render: (source) => (
+      <div>
+        {source.last_status ? (
+          <Badge variant={SOURCE_STATUS_BADGE[source.last_status]}>
+            {SOURCE_STATUS_LABELS[source.last_status].th}
+          </Badge>
+        ) : (
+          <Badge variant="outline">ยังไม่เคยดึง</Badge>
+        )}
+        <p className="mt-1 whitespace-nowrap text-xs text-slate-400">
+          {formatDateTimeTH(source.last_fetched_at)}
+        </p>
+      </div>
+    ),
+  },
+  {
+    key: "enabled",
+    header: "เปิดใช้งาน",
+    render: (source) => (
+      <SourceEnabledToggle sourceId={source.id} enabled={source.enabled} name={source.name} />
+    ),
+  },
+];
+
+export default async function CompetitorsPage() {
+  const [competitors, sources, events] = await Promise.all([
+    safe(listCompetitors()),
+    safe(listSources()),
+    safe(listChangeEvents({ limit: FEED_LIMIT })),
+  ]);
+
+  const header = (
+    <PageHeader
+      title="คู่แข่ง"
+      subtitle="ติดตามวิลล่าคู่แข่งย่าน Lipa Noi และ Chaweng · Competitors"
+      action={<WeeklyReportButton />}
+    />
+  );
+
+  // API fully unreachable → graceful fallback, never a crash.
+  if (!competitors && !sources && !events) {
     return (
       <div>
-        <PageHeader title="คู่แข่ง" subtitle="ความเคลื่อนไหวของวิลล่าคู่แข่งบนเกาะสมุย · Competitors" />
+        {header}
         <EmptyState />
       </div>
     );
   }
 
-  const changeLists = await Promise.all(
-    competitors.map((competitor) => safe(listCompetitorChanges(competitor.id))),
-  );
-
-  const feed: FeedEntry[] = [];
-  changeLists.forEach((list, index) => {
-    if (!list) return;
-    const competitorName = competitors[index].name;
-    for (const change of list) {
-      feed.push({ change, competitorName });
-    }
-  });
-  feed.sort((a, b) => b.change.detected_at.localeCompare(a.change.detected_at));
+  const competitorOptions = (competitors ?? []).map(({ id, name }) => ({ id, name }));
+  const activeCount = (competitors ?? []).filter((competitor) => competitor.active).length;
 
   return (
     <div>
-      <PageHeader title="คู่แข่ง" subtitle="ความเคลื่อนไหวของวิลล่าคู่แข่งบนเกาะสมุย · Competitors" />
+      {header}
 
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="space-y-6">
+        {/* Competitor registry */}
+        <Card>
+          <CardHeader
+            title="คู่แข่งที่ติดตาม"
+            subtitle="Registry — เปิด/ปิดการติดตาม หรือสั่งสแกนได้ทันที"
+            action={
+              competitors ? (
+                <Badge variant="blue">
+                  ติดตามอยู่ {formatNumber(activeCount)}/{formatNumber(competitors.length)} ราย
+                </Badge>
+              ) : undefined
+            }
+          />
+          <CardContent className="space-y-4">
+            {competitors ? (
+              <DataTable
+                columns={COMPETITOR_COLUMNS}
+                rows={competitors}
+                rowKey={(competitor) => competitor.id}
+                emptyText="ยังไม่มีคู่แข่งในระบบ — เพิ่มวิลล่าคู่แข่งรายแรกด้านล่างเพื่อเริ่มติดตาม"
+              />
+            ) : (
+              <p className="py-4 text-center text-sm text-slate-400">
+                API ยังไม่เชื่อมต่อ — แสดงทะเบียนคู่แข่งไม่ได้
+              </p>
+            )}
+            <CompetitorCreateForm />
+          </CardContent>
+        </Card>
+
+        {/* Sources */}
+        <Card>
+          <CardHeader
+            title="แหล่งข้อมูล"
+            subtitle="Sources — ทุก URL ผ่านนโยบาย ToS ก่อนเพิ่ม (compliance gate บังคับในโค้ด)"
+            action={
+              sources ? (
+                <Badge variant="blue">{formatNumber(sources.length)} แหล่ง</Badge>
+              ) : undefined
+            }
+          />
+          <CardContent className="space-y-4">
+            {sources ? (
+              <DataTable
+                columns={SOURCE_COLUMNS}
+                rows={sources}
+                rowKey={(source) => source.id}
+                emptyText="ยังไม่มีแหล่งข้อมูล — เพิ่มเว็บไซต์หรือฟีดของคู่แข่งด้านล่าง"
+              />
+            ) : (
+              <p className="py-4 text-center text-sm text-slate-400">
+                API ยังไม่เชื่อมต่อ — แสดงแหล่งข้อมูลไม่ได้
+              </p>
+            )}
+            <SourceCreateForm competitors={competitorOptions} />
+          </CardContent>
+        </Card>
+
         {/* Change feed */}
-        <div className="lg:col-span-2">
-          <Card>
-            <CardHeader
-              title="ฟีดความเคลื่อนไหว"
-              subtitle="Change feed — อัปเดตทุกวัน 06:00 น."
-              action={<Badge variant="blue">{formatNumber(feed.length)} รายการ</Badge>}
-            />
-            {feed.length === 0 ? (
-              <CardContent>
-                <p className="py-6 text-center text-sm text-slate-400">
-                  ยังไม่พบความเคลื่อนไหว — ระบบเก็บข้อมูลจะสะสม snapshot ของคู่แข่งทุกวัน
-                </p>
-              </CardContent>
-            ) : (
-              <ul className="divide-y divide-slate-100">
-                {feed.map(({ change, competitorName }) => (
-                  <li key={change.id} className="px-5 py-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <p className="text-sm leading-relaxed text-slate-800">{change.summary}</p>
-                      <Badge variant={SEVERITY_BADGE[change.severity]}>
-                        {SEVERITY_LABELS[change.severity].th}
-                      </Badge>
-                    </div>
-                    <p className="mt-1.5 text-xs text-slate-400">
-                      {competitorName} · {change.category} · {formatDateTimeTH(change.detected_at)}
-                    </p>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-        </div>
-
-        {/* Competitor set */}
-        <div>
-          <Card>
-            <CardHeader
-              title="คู่แข่งที่ติดตาม"
-              subtitle={`${formatNumber(competitors.length)} ราย (คัดเลือกโดยเจ้าของ)`}
-            />
-            {competitors.length === 0 ? (
-              <CardContent>
-                <p className="py-4 text-center text-sm text-slate-400">
-                  ยังไม่มีคู่แข่งในระบบ — เพิ่มวิลล่าคู่แข่งย่าน Lipa Noi และ Chaweng ได้ที่ตั้งค่า
-                </p>
-              </CardContent>
-            ) : (
-              <ul className="divide-y divide-slate-100">
-                {competitors.map((competitor) => (
-                  <li key={competitor.id} className="flex items-center gap-3 px-5 py-3">
-                    <span
-                      className={`h-2 w-2 shrink-0 rounded-full ${
-                        competitor.active ? "bg-emerald-500" : "bg-slate-300"
-                      }`}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-slate-800">{competitor.name}</p>
-                      <p className="truncate text-xs text-slate-400">{competitor.kind}</p>
-                    </div>
-                    <a
-                      href={competitor.website}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      title={competitor.website}
-                      className="text-slate-300 transition-colors hover:text-blue-600"
-                    >
-                      <Globe size={16} />
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-        </div>
+        <ChangeFeed initialEvents={events} competitors={competitorOptions} />
       </div>
     </div>
   );

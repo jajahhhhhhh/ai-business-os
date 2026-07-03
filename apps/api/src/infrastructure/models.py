@@ -166,6 +166,7 @@ class Milestone(TimestampMixin, Base):
 
 class Source(TimestampMixin, Base):
     __tablename__ = "sources"
+    __table_args__ = (sa.Index("ix_sources_competitor_id", "competitor_id"),)
 
     id: Mapped[uuid.UUID] = _uuid_pk()
     name: Mapped[str]
@@ -175,6 +176,14 @@ class Source(TimestampMixin, Base):
     robots_ok: Mapped[bool] = mapped_column(server_default=sa.text("false"))
     rate_limit_per_hr: Mapped[int] = mapped_column(server_default=sa.text("60"))
     enabled: Mapped[bool] = mapped_column(server_default=sa.text("false"))
+    # M3 competitor intel: source belongs to a competitor (nullable for
+    # generic lead sources) + last sweep outcome per source.
+    competitor_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.ForeignKey("competitors.id", ondelete="SET NULL")
+    )
+    last_fetched_at: Mapped[datetime | None]
+    # ok|unchanged|changed|refused|error
+    last_status: Mapped[str | None]
 
 
 class RawDocument(TimestampMixin, Base):

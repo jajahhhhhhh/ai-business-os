@@ -39,6 +39,18 @@ class EmptyDocumentError(ApplicationError):
         )
 
 
+class ComplianceRefusedError(ApplicationError):
+    """A source registration or fetch was refused by the compliance gate (§8.4).
+
+    Structural, not conventional: facebook/OTA domains can never be registered.
+    Maps to HTTP 422 with the violation reason in the detail (problems.py).
+    """
+
+    def __init__(self, reason: str, detail: str) -> None:
+        self.reason = reason
+        super().__init__(f"Refused by compliance gate ({reason}): {detail}")
+
+
 class UnrecognizedBankAlertError(ApplicationError):
     """Ingested text could not be parsed as a bank transaction alert."""
 

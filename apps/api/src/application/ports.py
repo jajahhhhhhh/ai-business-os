@@ -1,8 +1,8 @@
-"""Gateway ports for the knowledge base and memory (M2).
+"""Gateway ports for the knowledge base, memory (M2) and competitor intel (M3).
 
 The application layer owns these Protocols; infrastructure supplies the
-MinIO/Meilisearch/Qdrant/bge-m3 implementations and tests supply in-memory
-fakes (tests/fakes.py). Database repositories stay in
+MinIO/Meilisearch/Qdrant/bge-m3/Anthropic implementations and tests supply
+in-memory fakes (tests/fakes.py). Database repositories stay in
 src/application/repositories.py — these are the non-database gateways.
 """
 
@@ -11,6 +11,8 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Any, Protocol
 
 
@@ -85,3 +87,63 @@ class Embedder(Protocol):
 
     async def embed_texts(self, texts: Sequence[str]) -> list[list[float]]: ...
     async def embed_query(self, text: str) -> list[float]: ...
+
+
+# --------------------------------------------------------------- M3: LLM port
+
+
+@dataclass(frozen=True, slots=True)
+class ChangeAnalysis:
+    """LLM judgment on one competitor page diff (summary in Thai)."""
+
+    summary_th: str
+    category: str  # pricing|promotion|content|availability|reviews|other
+    severity: str  # low|medium|high|critical
+    tokens_in: int
+    tokens_out: int
+    cost_usd: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class WeeklyReportEvent:
+    """One change event as fed to the weekly-report composer/LLM."""
+
+    competitor_name: str
+    category: str
+    severity: str
+    summary: str
+    detected_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class WeeklyReportContext:
+    period_start: date
+    period_end: date
+    # Deterministic Thai template (application/competitor_report.py) — the
+    # LLM upgrades it to an executive version; callers fall back to it as-is.
+    template_report: str
+    events: tuple[WeeklyReportEvent, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ReportText:
+    text: str
+    tokens_in: int
+    tokens_out: int
+    cost_usd: Decimal
+
+
+class ChangeAnalyst(Protocol):
+    """LLM gateway for competitor intel. None results mean "unavailable or
+    over budget" — callers must fall back to the rule-based path."""
+
+    @property
+    def is_available(self) -> bool:
+        """False when no API key is configured (NullChangeAnalyst)."""
+        ...
+
+    async def analyze_change(
+        self, competitor_name: str, url: str, diff_excerpt: str
+    ) -> ChangeAnalysis | None: ...
+
+    async def compose_weekly_report(self, context: WeeklyReportContext) -> ReportText | None: ...
