@@ -1,34 +1,45 @@
-"""Celery worker + beat schedule (M1).
+"""Celery worker + beat schedule (M1 + M2).
 
-Two production tasks:
-- sync_bank_alerts   — poll Gmail for Thai bank alerts every 2 h (skips cleanly
-                       when Gmail credentials are unset)
+Production tasks:
+- sync_bank_alerts    — poll Gmail for Thai bank alerts every 2 h (skips cleanly
+                        when Gmail credentials are unset)
 - send_daily_snapshot — 07:30 Asia/Bangkok Thai snapshot, stored + pushed to LINE
+- process_document    — M2 KB ingestion pipeline (parse -> chunk -> index),
+                        dispatched per upload by POST /v1/kb/documents
+- consolidate_memories — Sun 03:00 Asia/Bangkok memory merge + expiry (§13)
 
 Tasks are sync Celery functions wrapping the async use cases with asyncio.run;
 each run builds and disposes its own engine so worker processes never leak
-connections across task invocations.
+connections across task invocations. KB gateway adapters come from the shared
+build_kb_adapters helper (src/infrastructure/adapters.py).
 """
 
 from __future__ import annotations
 
 import asyncio
+import uuid
 
 import structlog
 from celery import Celery
 from celery.schedules import crontab
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.application.bank_transactions import BankTransactionUseCases
 from src.application.errors import UnrecognizedBankAlertError
+from src.application.kb import ERROR_MAX_CHARS, KnowledgeBaseUseCases
+from src.application.memory import MemoryUseCases
 from src.application.renovation import RenovationUseCases
 from src.application.snapshot import DailySnapshotUseCases
 from src.config import get_settings
+from src.infrastructure.adapters import KbAdapters, build_kb_adapters
 from src.infrastructure.audit import SqlAuditWriter
 from src.infrastructure.db import build_engine, build_sessionmaker
 from src.infrastructure.gmail import GmailClient
 from src.infrastructure.line import LineClient
 from src.infrastructure.repositories import (
     BankTransactionSqlRepository,
+    KnowledgeBaseSqlRepository,
+    MemorySqlRepository,
     RenovationSqlRepository,
     SnapshotSqlRepository,
 )
@@ -54,6 +65,11 @@ celery_app.conf.beat_schedule = {
     "daily-snapshot-0730": {
         "task": "src.worker.send_daily_snapshot",
         "schedule": crontab(minute=30, hour=7),
+    },
+    # ARCHITECTURE.md §13: memory consolidation Sun 03:00 Asia/Bangkok.
+    "consolidate-memories-sun-0300": {
+        "task": "src.worker.consolidate_memories",
+        "schedule": crontab(minute=0, hour=3, day_of_week="sun"),
     },
 }
 
@@ -121,6 +137,96 @@ async def _send_daily_snapshot() -> dict[str, object]:
     return {"report_id": str(result.report.id), "line_sent": result.line_sent}
 
 
+# --------------------------------------------------------------------- M2: KB
+
+
+def _kb_use_cases(session: AsyncSession, adapters: KbAdapters) -> KnowledgeBaseUseCases:
+    return KnowledgeBaseUseCases(
+        KnowledgeBaseSqlRepository(session),
+        SqlAuditWriter(session),
+        storage=adapters.storage,
+        keyword_index=adapters.keyword_index,
+        vector_index=adapters.vector_index,
+        embedder=adapters.embedder,
+        extract=adapters.extract,
+    )
+
+
+async def run_document_pipeline(
+    document_id: uuid.UUID,
+    *,
+    maker: async_sessionmaker[AsyncSession],
+    adapters: KbAdapters,
+) -> dict[str, str]:
+    """Run the KB pipeline for one document; NEVER raises.
+
+    On failure the pipeline transaction is rolled back and status='failed'
+    (error truncated to ERROR_MAX_CHARS) is persisted in a FRESH session — the
+    failed transaction may be unusable. Shared by the Celery task and the
+    BackgroundTasks fallback in the kb router.
+    """
+    error: str
+    async with maker() as session:
+        try:
+            document = await _kb_use_cases(session, adapters).process_document(
+                document_id, actor=WORKER_ACTOR
+            )
+            await session.commit()
+            logger.info("process_document_done", document_id=str(document_id))
+            return {"document_id": str(document_id), "status": document.status}
+        except Exception as exc:  # noqa: BLE001 - recorded on the row below
+            await session.rollback()
+            logger.warning(
+                "process_document_failed", document_id=str(document_id), error=str(exc)
+            )
+            error = str(exc)[:ERROR_MAX_CHARS] or exc.__class__.__name__
+    try:
+        async with maker() as session:
+            repo = KnowledgeBaseSqlRepository(session)
+            await repo.update_document(document_id, {"status": "failed", "error": error})
+            await SqlAuditWriter(session).write(
+                WORKER_ACTOR, "kb.document_failed", "documents", document_id, {"error": error}
+            )
+            await session.commit()
+    except Exception:  # noqa: BLE001 - DB unusable; the row keeps its last status
+        logger.exception("process_document_status_write_failed", document_id=str(document_id))
+    return {"document_id": str(document_id), "status": "failed"}
+
+
+async def _process_document(document_id: str) -> dict[str, str]:
+    settings = get_settings()
+    engine = build_engine(settings.database_url)
+    try:
+        return await run_document_pipeline(
+            uuid.UUID(document_id),
+            maker=build_sessionmaker(engine),
+            adapters=build_kb_adapters(settings),
+        )
+    finally:
+        await engine.dispose()
+
+
+async def _consolidate_memories() -> dict[str, int]:
+    settings = get_settings()
+    engine = build_engine(settings.database_url)
+    adapters = build_kb_adapters(settings)
+    try:
+        maker = build_sessionmaker(engine)
+        async with maker() as session:
+            use_cases = MemoryUseCases(
+                MemorySqlRepository(session),
+                SqlAuditWriter(session),
+                vector_index=adapters.vector_index,
+                embedder=adapters.embedder,
+            )
+            result = await use_cases.consolidate(WORKER_ACTOR)
+            await session.commit()
+    finally:
+        await engine.dispose()
+    logger.info("consolidate_memories_done", merged=result.merged, expired=result.expired)
+    return {"merged": result.merged, "expired": result.expired}
+
+
 @celery_app.task(name="src.worker.sync_bank_alerts", bind=True, max_retries=3)
 def sync_bank_alerts(self) -> dict[str, int]:  # noqa: ANN001 - celery bind
     try:
@@ -134,4 +240,24 @@ def send_daily_snapshot(self) -> dict[str, object]:  # noqa: ANN001 - celery bin
     try:
         return asyncio.run(_send_daily_snapshot())
     except Exception as exc:
+        raise self.retry(exc=exc, countdown=60 * (2**self.request.retries)) from exc
+
+
+@celery_app.task(name="src.worker.process_document", bind=True)
+def process_document(self, document_id: str) -> dict[str, str]:  # noqa: ANN001 - celery bind
+    """No retry: run_document_pipeline never raises — parse/index failures are
+    recorded on the document row (status='failed') and must not raise out of
+    the worker task."""
+    try:
+        return asyncio.run(_process_document(document_id))
+    except Exception:  # noqa: BLE001 - defensive: even setup failures stay in-task
+        logger.exception("process_document_task_error", document_id=document_id)
+        return {"document_id": document_id, "status": "failed"}
+
+
+@celery_app.task(name="src.worker.consolidate_memories", bind=True, max_retries=3)
+def consolidate_memories(self) -> dict[str, int]:  # noqa: ANN001 - celery bind
+    try:
+        return asyncio.run(_consolidate_memories())
+    except Exception as exc:  # transient DB failures retry with backoff
         raise self.retry(exc=exc, countdown=60 * (2**self.request.retries)) from exc

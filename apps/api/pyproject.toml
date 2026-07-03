@@ -15,7 +15,21 @@ dependencies = [
     "prometheus-client>=0.21",
     "celery[redis]>=5.4",
     "httpx>=0.27",
+    "python-multipart>=0.0.12",
+    "boto3>=1.35",
+    "qdrant-client>=1.12",
 ]
+
+# Optional extras (M2). `parsing` is optional rather than core because
+# pdfplumber/pdf2image drag in heavy binary deps (pypdfium2, poppler) that the
+# API container installs explicitly but slim local environments may skip —
+# src/infrastructure/parsing.py degrades with a clear error when absent.
+# `ml` (sentence-transformers -> torch, ~GBs) is gated by the Dockerfile's
+# INSTALL_ML arg; without it the embedder reports is_available=False and the
+# KB degrades to keyword-only search (NFR-1).
+[project.optional-dependencies]
+ml = ["sentence-transformers>=3.2"]
+parsing = ["pdfplumber>=0.11", "pytesseract>=0.3.13", "pdf2image>=1.17"]
 
 [dependency-groups]
 dev = [

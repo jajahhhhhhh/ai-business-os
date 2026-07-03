@@ -14,6 +14,31 @@ class NotFoundError(ApplicationError):
         super().__init__(f"{entity} {entity_id} not found")
 
 
+class UnsupportedDocumentError(ApplicationError):
+    """The uploaded document's mime type (or missing parser) cannot be handled."""
+
+    def __init__(self, mime: str, detail: str | None = None) -> None:
+        self.mime = mime
+        super().__init__(
+            detail
+            or (
+                f"Unsupported document type {mime!r}. Supported: text/plain, "
+                "text/markdown, application/pdf, image/png, image/jpeg."
+            )
+        )
+
+
+class EmptyDocumentError(ApplicationError):
+    """Parsing succeeded but produced no indexable text."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "No text could be extracted from the document. For scanned PDFs and "
+            "images, OCR support (the 'parsing' extra plus tesseract-ocr-tha) "
+            "must be installed."
+        )
+
+
 class UnrecognizedBankAlertError(ApplicationError):
     """Ingested text could not be parsed as a bank transaction alert."""
 

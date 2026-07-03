@@ -262,6 +262,82 @@ class ChangeEventOut(ORMModel):
     detected_at: datetime
 
 
+# ------------------------------------------------------------------ knowledge base
+
+DocumentStatus = Literal["pending", "parsing", "indexed", "failed"]
+SearchMode = Literal["hybrid", "keyword", "semantic"]
+
+
+class DocumentOut(ORMModel):
+    # storage_key intentionally omitted: internal MinIO detail.
+    id: uuid.UUID
+    title: str
+    mime: str
+    lang: str | None
+    status: DocumentStatus
+    ocr_done: bool
+    meili_indexed: bool
+    embedded: bool
+    size_bytes: int | None
+    source: str
+    error: str | None
+    created_at: datetime
+
+
+class DocumentDetailOut(DocumentOut):
+    chunk_count: int
+
+
+class SearchResultOut(BaseModel):
+    chunk_id: uuid.UUID
+    document_id: uuid.UUID
+    document_title: str
+    seq: int
+    text: str
+    score: float
+    matched_by: list[str]
+
+
+class SearchOut(BaseModel):
+    query: str
+    mode: SearchMode
+    # True when the semantic side was requested but unavailable (NFR-1).
+    degraded: bool
+    results: list[SearchResultOut]
+
+
+# ------------------------------------------------------------------ memory
+
+MemoryKind = Literal["business", "person", "competitor", "campaign", "decision", "task"]
+
+
+class MemoryCreate(BaseModel):
+    kind: MemoryKind
+    subject: str = Field(min_length=1, max_length=500)
+    body: str = Field(min_length=1, max_length=20_000)
+    importance: int = Field(default=3, ge=1, le=5)
+    expires_at: datetime | None = None
+
+
+class MemoryOut(ORMModel):
+    id: uuid.UUID
+    kind: str
+    subject: str
+    body: str
+    importance: int
+    expires_at: datetime | None
+    created_at: datetime
+
+
+class MemorySearchOut(MemoryOut):
+    score: float
+
+
+class ConsolidateOut(BaseModel):
+    merged: int
+    expired: int
+
+
 # ------------------------------------------------------------------ agents & automation
 
 

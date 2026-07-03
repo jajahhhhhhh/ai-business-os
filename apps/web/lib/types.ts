@@ -200,6 +200,74 @@ export interface DailySnapshot {
 }
 
 // ---------------------------------------------------------------------------
+// Knowledge base (M2) — documents, ingestion status, hybrid search
+// ---------------------------------------------------------------------------
+
+export type KbDocumentStatus = "pending" | "parsing" | "indexed" | "failed";
+
+export type KbLang = "th" | "en";
+
+/** POST /v1/kb/documents (202) · GET /v1/kb/documents list item. */
+export interface KbDocument {
+  id: string;
+  title: string;
+  mime: string;
+  lang: string | null;
+  status: KbDocumentStatus;
+  ocr_done: boolean;
+  meili_indexed: boolean;
+  embedded: boolean;
+  size_bytes: number | null;
+  source: string;
+  error: string | null;
+  created_at: string;
+}
+
+/** GET /v1/kb/documents/{id} — document enriched with chunk count. */
+export interface KbDocumentDetail extends KbDocument {
+  chunk_count: number;
+}
+
+export interface KbDocumentListParams {
+  status?: KbDocumentStatus;
+  limit?: number;
+}
+
+/** POST /v1/kb/documents — multipart form fields. */
+export interface KbDocumentUpload {
+  file: File;
+  title?: string;
+  lang?: KbLang;
+}
+
+export type KbSearchMode = "hybrid" | "keyword" | "semantic";
+
+export interface KbSearchParams {
+  q: string;
+  mode?: KbSearchMode;
+  limit?: number;
+}
+
+export interface KbSearchResult {
+  chunk_id: string;
+  document_id: string;
+  document_title: string;
+  seq: number;
+  text: string;
+  score: number;
+  /** Which index matched this chunk, e.g. ["keyword", "vector"]. */
+  matched_by: string[];
+}
+
+/** GET /v1/kb/search — degraded=true means semantic side was unavailable. */
+export interface KbSearchResponse {
+  query: string;
+  mode: string;
+  degraded: boolean;
+  results: KbSearchResult[];
+}
+
+// ---------------------------------------------------------------------------
 // Leads (Phase C schema, ready now)
 // ---------------------------------------------------------------------------
 

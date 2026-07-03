@@ -1,4 +1,4 @@
-"""SQLAlchemy 2.0 models. Must mirror the alembic revision chain (0001-0002) exactly."""
+"""SQLAlchemy 2.0 models. Must mirror the alembic revision chain (0001-0003) exactly."""
 
 from __future__ import annotations
 
@@ -295,6 +295,7 @@ class ChangeEvent(TimestampMixin, Base):
 
 class Document(TimestampMixin, SoftDeleteMixin, Base):
     __tablename__ = "documents"
+    __table_args__ = (sa.Index("ix_documents_status", "status"),)
 
     id: Mapped[uuid.UUID] = _uuid_pk()
     title: Mapped[str]
@@ -304,6 +305,11 @@ class Document(TimestampMixin, SoftDeleteMixin, Base):
     ocr_done: Mapped[bool] = mapped_column(server_default=sa.text("false"))
     meili_indexed: Mapped[bool] = mapped_column(server_default=sa.text("false"))
     embedded: Mapped[bool] = mapped_column(server_default=sa.text("false"))
+    # pending|parsing|indexed|failed (M2 ingestion pipeline)
+    status: Mapped[str] = mapped_column(server_default=sa.text("'pending'"))
+    error: Mapped[str | None]
+    size_bytes: Mapped[int | None] = mapped_column(sa.BigInteger())
+    source: Mapped[str] = mapped_column(server_default=sa.text("'upload'"))
 
 
 class Chunk(TimestampMixin, Base):
@@ -355,6 +361,10 @@ class Memory(TimestampMixin, Base):
     expires_at: Mapped[datetime | None]
     source_run_id: Mapped[uuid.UUID | None] = mapped_column(
         sa.ForeignKey("agent_runs.id", ondelete="SET NULL")
+    )
+    # Set when this memory was merged into a surviving duplicate (M2).
+    consolidated_into: Mapped[uuid.UUID | None] = mapped_column(
+        sa.ForeignKey("memories.id", ondelete="SET NULL")
     )
 
 

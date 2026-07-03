@@ -101,6 +101,10 @@ services:
     <<: [*restart, *logging]
     profiles: [prod]
     env_file: .env
+    environment:
+      HF_HOME: /models  # bge-m3 weights cached across restarts (shared volume)
+    volumes:
+      - hf_models:/models
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -113,6 +117,10 @@ services:
     profiles: [prod]
     command: ["celery", "-A", "src.worker", "worker", "--loglevel=INFO", "--concurrency=2"]
     env_file: .env
+    environment:
+      HF_HOME: /models
+    volumes:
+      - hf_models:/models
     depends_on:
       redis: { condition: service_healthy }
       migrate: { condition: service_completed_successfully }
@@ -187,6 +195,7 @@ services:
       - "127.0.0.1:8001:8080"
 
 volumes:
+  hf_models:
   pg_data:
   redis_data:
   qdrant_data:

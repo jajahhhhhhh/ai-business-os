@@ -13,6 +13,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.application.bank_transactions import MATCHED
+from src.application.errors import NotFoundError
 from src.application.snapshot import SiteSnapshot
 from src.domain.cursor import Cursor
 from src.domain.draws import DrawStatus
@@ -21,12 +22,15 @@ from src.infrastructure.models import (
     AgentRun,
     BankTransaction,
     ChangeEvent,
+    Chunk,
     Competitor,
     Contractor,
+    Document,
     Draw,
     Job,
     Lead,
     LeadEvent,
+    Memory,
     Milestone,
     Quotation,
     Report,
@@ -611,3 +615,216 @@ class JobSqlRepository:
         await self._session.flush()
         await self._session.refresh(job)
         return job
+
+
+@dataclass(frozen=True, slots=True)
+class ChunkHydrationData:
+    """A chunk joined with its document title, for search-result hydration."""
+
+    id: uuid.UUID
+    document_id: uuid.UUID
+    document_title: str
+    seq: int
+    text: str
+
+
+class KnowledgeBaseSqlRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def create_document(
+        self,
+        *,
+        id: uuid.UUID,  # noqa: A002 - mirrors the protocol/column name
+        title: str,
+        mime: str,
+        storage_key: str,
+        lang: str | None,
+        size_bytes: int,
+        source: str,
+    ) -> Document:
+        document = Document(
+            id=id,
+            title=title,
+            mime=mime,
+            storage_key=storage_key,
+            lang=lang,
+            size_bytes=size_bytes,
+            source=source,
+            status="pending",
+        )
+        self._session.add(document)
+        await self._session.flush()
+        await self._session.refresh(document)
+        return document
+
+    async def get_document(self, document_id: uuid.UUID) -> Document | None:
+        stmt = sa.select(Document).where(
+            Document.id == document_id, Document.deleted_at.is_(None)
+        )
+        return (await self._session.execute(stmt)).scalar_one_or_none()
+
+    async def list_documents(self, status: str | None, limit: int) -> Sequence[Document]:
+        stmt = sa.select(Document).where(Document.deleted_at.is_(None))
+        if status:
+            stmt = stmt.where(Document.status == status)
+        stmt = stmt.order_by(Document.created_at.desc(), Document.id.desc()).limit(limit)
+        return (await self._session.execute(stmt)).scalars().all()
+
+    async def update_document(
+        self, document_id: uuid.UUID, changes: dict[str, Any]
+    ) -> Document:
+        document = await self.get_document(document_id)
+        if document is None:
+            raise NotFoundError("document", document_id)
+        for field, value in changes.items():
+            setattr(document, field, value)
+        await self._session.flush()
+        await self._session.refresh(document)
+        return document
+
+    async def replace_chunks(
+        self, document_id: uuid.UUID, chunks: Sequence[tuple[int, str]]
+    ) -> Sequence[Chunk]:
+        await self._session.execute(sa.delete(Chunk).where(Chunk.document_id == document_id))
+        rows = [Chunk(document_id=document_id, seq=seq, text=text) for seq, text in chunks]
+        self._session.add_all(rows)
+        await self._session.flush()
+        return rows
+
+    async def set_chunk_point_ids(self, chunk_ids: Sequence[uuid.UUID]) -> None:
+        """Record that each chunk's Qdrant point id is its own uuid (as text)."""
+        if not chunk_ids:
+            return
+        await self._session.execute(
+            sa.update(Chunk)
+            .where(Chunk.id.in_(list(chunk_ids)))
+            .values(qdrant_point_id=sa.cast(Chunk.id, sa.Text()))
+        )
+
+    async def chunk_count(self, document_id: uuid.UUID) -> int:
+        stmt = sa.select(sa.func.count()).select_from(Chunk).where(
+            Chunk.document_id == document_id
+        )
+        return int((await self._session.execute(stmt)).scalar_one())
+
+    async def get_chunks_with_titles(
+        self, chunk_ids: Sequence[uuid.UUID]
+    ) -> Sequence[ChunkHydrationData]:
+        if not chunk_ids:
+            return []
+        stmt = (
+            sa.select(Chunk.id, Chunk.document_id, Document.title, Chunk.seq, Chunk.text)
+            .join(Document, Document.id == Chunk.document_id)
+            .where(Chunk.id.in_(list(chunk_ids)), Document.deleted_at.is_(None))
+        )
+        return [
+            ChunkHydrationData(
+                id=row.id,
+                document_id=row.document_id,
+                document_title=row.title,
+                seq=row.seq,
+                text=row.text,
+            )
+            for row in (await self._session.execute(stmt)).all()
+        ]
+
+
+def _like_escape(q: str) -> str:
+    return q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+class MemorySqlRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    @staticmethod
+    def _active(now: datetime) -> sa.ColumnElement[bool]:
+        return sa.and_(
+            Memory.consolidated_into.is_(None),
+            sa.or_(Memory.expires_at.is_(None), Memory.expires_at > now),
+        )
+
+    async def create(
+        self,
+        *,
+        kind: str,
+        subject: str,
+        body: str,
+        importance: int,
+        expires_at: datetime | None,
+        source_run_id: uuid.UUID | None,
+    ) -> Memory:
+        memory = Memory(
+            kind=kind,
+            subject=subject,
+            body=body,
+            importance=importance,
+            expires_at=expires_at,
+            source_run_id=source_run_id,
+        )
+        self._session.add(memory)
+        await self._session.flush()
+        await self._session.refresh(memory)
+        return memory
+
+    async def set_embedding_point(self, memory_id: uuid.UUID, point_id: str) -> Memory:
+        memory = await self._session.get(Memory, memory_id)
+        if memory is None:
+            raise NotFoundError("memory", memory_id)
+        memory.embedding_point_id = point_id
+        await self._session.flush()
+        await self._session.refresh(memory)
+        return memory
+
+    async def search_text(
+        self, q: str, kind: str | None, limit: int, now: datetime
+    ) -> Sequence[Memory]:
+        pattern = f"%{_like_escape(q)}%"
+        stmt = sa.select(Memory).where(
+            self._active(now),
+            sa.or_(
+                Memory.subject.ilike(pattern, escape="\\"),
+                Memory.body.ilike(pattern, escape="\\"),
+            ),
+        )
+        if kind:
+            stmt = stmt.where(Memory.kind == kind)
+        stmt = stmt.order_by(
+            Memory.importance.desc(), Memory.created_at.desc(), Memory.id
+        ).limit(limit)
+        return (await self._session.execute(stmt)).scalars().all()
+
+    async def get_active_many(
+        self, memory_ids: Sequence[uuid.UUID], now: datetime
+    ) -> Sequence[Memory]:
+        if not memory_ids:
+            return []
+        stmt = sa.select(Memory).where(Memory.id.in_(list(memory_ids)), self._active(now))
+        return (await self._session.execute(stmt)).scalars().all()
+
+    async def list_active(self, now: datetime) -> Sequence[Memory]:
+        stmt = sa.select(Memory).where(self._active(now)).order_by(Memory.created_at, Memory.id)
+        return (await self._session.execute(stmt)).scalars().all()
+
+    async def list_expired(self, now: datetime) -> Sequence[Memory]:
+        stmt = sa.select(Memory).where(
+            Memory.expires_at.is_not(None), Memory.expires_at <= now
+        )
+        return (await self._session.execute(stmt)).scalars().all()
+
+    async def mark_consolidated(
+        self, memory_ids: Sequence[uuid.UUID], survivor_id: uuid.UUID
+    ) -> None:
+        if not memory_ids:
+            return
+        await self._session.execute(
+            sa.update(Memory)
+            .where(Memory.id.in_(list(memory_ids)))
+            .values(consolidated_into=survivor_id)
+        )
+
+    async def delete_many(self, memory_ids: Sequence[uuid.UUID]) -> None:
+        if not memory_ids:
+            return
+        await self._session.execute(sa.delete(Memory).where(Memory.id.in_(list(memory_ids))))

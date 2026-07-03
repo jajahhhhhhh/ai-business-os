@@ -23,6 +23,12 @@ import type {
   DrawRow,
   Health,
   Job,
+  KbDocument,
+  KbDocumentDetail,
+  KbDocumentListParams,
+  KbDocumentUpload,
+  KbSearchParams,
+  KbSearchResponse,
   Lead,
   LeadListParams,
   Milestone,
@@ -41,6 +47,10 @@ const DEFAULT_BASE_URL = "http://localhost:8000";
 const REQUEST_TIMEOUT_MS = 5000;
 /** Mutations may hit the LLM (daily snapshot) — allow more headroom than GETs. */
 const MUTATION_TIMEOUT_MS = 20000;
+/** Hybrid search embeds the query server-side — slower than a plain GET. */
+const SEARCH_TIMEOUT_MS = 15000;
+/** File uploads may push 25 MB over home upstream — be generous. */
+const UPLOAD_TIMEOUT_MS = 60000;
 
 export function apiBaseUrl(): string {
   return process.env.NEXT_PUBLIC_API_URL ?? DEFAULT_BASE_URL;
@@ -58,7 +68,11 @@ export class ApiError extends Error {
 
 type QueryValue = string | number | boolean | undefined;
 
-async function get<T>(path: string, query?: Record<string, QueryValue>): Promise<T> {
+async function get<T>(
+  path: string,
+  query?: Record<string, QueryValue>,
+  timeoutMs: number = REQUEST_TIMEOUT_MS,
+): Promise<T> {
   const url = new URL(`/v1${path}`, apiBaseUrl());
   if (query) {
     for (const [key, value] of Object.entries(query)) {
@@ -71,7 +85,7 @@ async function get<T>(path: string, query?: Record<string, QueryValue>): Promise
   const res = await fetch(url.toString(), {
     cache: "no-store",
     headers: { Accept: "application/json" },
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    signal: AbortSignal.timeout(timeoutMs),
   });
 
   if (!res.ok) {
@@ -134,6 +148,31 @@ async function mutate<T>(
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
     signal: AbortSignal.timeout(MUTATION_TIMEOUT_MS),
+  });
+
+  if (!res.ok) {
+    throw new ApiError(res.status, await problemDetail(res));
+  }
+  return (await res.json()) as T;
+}
+
+/**
+ * Multipart upload (POST FormData) for `use client` components. Throws
+ * `ApiError` with the problem+json detail, same as `mutate`.
+ *
+ * Deliberately does NOT set Content-Type — the browser adds
+ * `multipart/form-data; boundary=...` itself, and setting it manually would
+ * drop the boundary and break parsing server-side.
+ */
+async function uploadForm<T>(path: string, form: FormData): Promise<T> {
+  const url = new URL(`/v1${path}`, apiBaseUrl());
+
+  const res = await fetch(url.toString(), {
+    method: "POST",
+    cache: "no-store",
+    headers: { Accept: "application/json" },
+    body: form,
+    signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
   });
 
   if (!res.ok) {
@@ -310,4 +349,45 @@ export async function matchBankTransaction(id: string, drawId: string): Promise<
 
 export function generateDailySnapshot(): Promise<DailySnapshot> {
   return mutate<DailySnapshot>("POST", "/reports/daily-snapshot:generate");
+}
+
+// ---------------------------------------------------------------------------
+// Knowledge base (M2) — reads for server components, search for the client
+// ---------------------------------------------------------------------------
+
+/** GET /v1/kb/documents — newest first. */
+export function listKbDocuments(params: KbDocumentListParams = {}): Promise<KbDocument[]> {
+  return get<KbDocument[]>("/kb/documents", {
+    status: params.status,
+    limit: params.limit,
+  });
+}
+
+export function getKbDocument(id: string): Promise<KbDocumentDetail> {
+  return get<KbDocumentDetail>(`/kb/documents/${encodeURIComponent(id)}`);
+}
+
+/**
+ * GET /v1/kb/search — called from `use client` components (user-interactive
+ * search), never during server render.
+ */
+export function searchKb(params: KbSearchParams): Promise<KbSearchResponse> {
+  return get<KbSearchResponse>(
+    "/kb/search",
+    { q: params.q, mode: params.mode, limit: params.limit },
+    SEARCH_TIMEOUT_MS,
+  );
+}
+
+/**
+ * POST /v1/kb/documents (multipart) → 202 with the pending document.
+ * Throws ApiError with a display-ready detail (e.g. 413 ไฟล์ใหญ่เกิน 25 MB).
+ */
+export function uploadKbDocument(payload: KbDocumentUpload): Promise<KbDocument> {
+  const form = new FormData();
+  form.append("file", payload.file);
+  const title = payload.title?.trim();
+  if (title) form.append("title", title);
+  if (payload.lang) form.append("lang", payload.lang);
+  return uploadForm<KbDocument>("/kb/documents", form);
 }

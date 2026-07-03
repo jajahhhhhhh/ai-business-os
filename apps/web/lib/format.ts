@@ -76,6 +76,16 @@ export function formatDateTimeTH(iso: string | null | undefined): string {
   return date ? DATE_TIME.format(date) : "—";
 }
 
+/** File size in B / KB / MB, e.g. "812 KB", "2.4 MB"; null → "—". */
+export function formatBytes(bytes: number | null | undefined): string {
+  if (bytes === null || bytes === undefined || bytes < 0) return "—";
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${NUMBER_TH.format(Math.round(kb))} KB`;
+  const mb = kb / 1024;
+  return `${mb >= 10 ? Math.round(mb) : mb.toFixed(1)} MB`;
+}
+
 /** Integer percentage of value/total, clamped to [0, 999]. */
 export function percentOf(value: number, total: number): number {
   if (total <= 0) return 0;

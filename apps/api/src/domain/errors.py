@@ -45,3 +45,7 @@ class InvalidScoreError(DomainError):
 
 class InvalidCursorError(DomainError):
     """Pagination cursor could not be decoded."""
+
+
+class InvalidImportanceError(DomainError):
+    """Memory importance outside the 1-5 range."""

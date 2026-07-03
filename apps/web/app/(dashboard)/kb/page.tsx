@@ -1,89 +1,194 @@
 import type { Metadata } from "next";
-import { BookOpen, FileText, Image as ImageIcon, Mail, Search } from "lucide-react";
+import {
+  File,
+  FileText,
+  FileType,
+  Image as ImageIcon,
+  ScanText,
+  Sparkles,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import { DataTable } from "@/components/DataTable";
+import type { Column } from "@/components/DataTable";
+import { EmptyState } from "@/components/EmptyState";
+import { KbRefreshButton } from "@/components/kb/KbRefreshButton";
+import { KbSearch } from "@/components/kb/KbSearch";
+import { KbUploadForm } from "@/components/kb/KbUploadForm";
 import { PageHeader } from "@/components/PageHeader";
 import { Badge } from "@/components/ui/Badge";
-import { Button } from "@/components/ui/Button";
-import { Card, CardContent } from "@/components/ui/Card";
-import { getHealth, safe } from "@/lib/api";
+import type { BadgeVariant } from "@/components/ui/Badge";
+import { Card, CardContent, CardHeader } from "@/components/ui/Card";
+import { listKbDocuments, safe } from "@/lib/api";
+import { formatBytes, formatDateTimeTH } from "@/lib/format";
+import { KB_DOC_STATUS_LABELS } from "@/lib/i18n";
+import type { KbDocument, KbDocumentStatus } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = { title: "คลังความรู้" };
 
-const DOC_KINDS = [
-  { icon: FileText, label: "ใบเสนอราคา / สัญญา" },
-  { icon: Mail, label: "อีเมลสำคัญ" },
-  { icon: ImageIcon, label: "รูปหน้างาน" },
-  { icon: BookOpen, label: "โน้ตการตัดสินใจ" },
+const DOCUMENT_LIMIT = 50;
+
+const STATUS_BADGE: Record<KbDocumentStatus, BadgeVariant> = {
+  pending: "neutral",
+  parsing: "blue",
+  indexed: "green",
+  failed: "red",
+};
+
+function mimeIcon(mime: string): LucideIcon {
+  if (mime === "application/pdf") return FileText;
+  if (mime.startsWith("image/")) return ImageIcon;
+  if (mime.startsWith("text/")) return FileType;
+  return File;
+}
+
+/** Small done/not-done pipeline indicator (OCR, vector embedding). */
+function StageIndicator({
+  icon: Icon,
+  label,
+  done,
+}: {
+  icon: LucideIcon;
+  label: string;
+  done: boolean;
+}) {
+  return (
+    <span
+      title={done ? `${label} — เสร็จแล้ว` : `${label} — ยังไม่เสร็จ`}
+      className={`inline-flex items-center gap-1 text-xs ${
+        done ? "text-emerald-600" : "text-slate-300"
+      }`}
+    >
+      <Icon size={13} />
+      {label}
+    </span>
+  );
+}
+
+const COLUMNS: Column<KbDocument>[] = [
+  {
+    key: "title",
+    header: "เอกสาร",
+    render: (doc) => {
+      const Icon = mimeIcon(doc.mime);
+      return (
+        <div className="flex items-start gap-2.5">
+          <span className="mt-0.5 shrink-0 rounded-lg bg-slate-100 p-1.5 text-slate-500">
+            <Icon size={15} />
+          </span>
+          <div className="min-w-0">
+            <p className="font-medium text-slate-900">{doc.title}</p>
+            <p className="text-xs text-slate-400">
+              {doc.mime}
+              {doc.lang ? ` · ${doc.lang === "th" ? "ไทย" : doc.lang.toUpperCase()}` : ""}
+            </p>
+            {doc.status === "failed" && doc.error && (
+              <p
+                title={doc.error}
+                className="mt-0.5 max-w-[18rem] truncate text-xs text-rose-600"
+              >
+                {doc.error}
+              </p>
+            )}
+          </div>
+        </div>
+      );
+    },
+  },
+  {
+    key: "size",
+    header: "ขนาด",
+    align: "right",
+    render: (doc) => (
+      <span className="whitespace-nowrap text-slate-500">{formatBytes(doc.size_bytes)}</span>
+    ),
+  },
+  {
+    key: "status",
+    header: "สถานะ",
+    render: (doc) => (
+      <div>
+        <Badge variant={STATUS_BADGE[doc.status]}>
+          {KB_DOC_STATUS_LABELS[doc.status].th}
+        </Badge>
+        {(doc.status === "pending" || doc.status === "parsing") && (
+          <p className="mt-1 whitespace-nowrap text-xs text-amber-600">
+            กด รีเฟรช เพื่ออัปเดตสถานะ
+          </p>
+        )}
+      </div>
+    ),
+  },
+  {
+    key: "stages",
+    header: "การประมวลผล",
+    render: (doc) => (
+      <div className="flex flex-col gap-1">
+        <StageIndicator icon={ScanText} label="OCR" done={doc.ocr_done} />
+        <StageIndicator icon={Sparkles} label="ฝังเวกเตอร์" done={doc.embedded} />
+      </div>
+    ),
+  },
+  {
+    key: "created_at",
+    header: "อัปโหลดเมื่อ",
+    render: (doc) => (
+      <span className="whitespace-nowrap text-slate-500">
+        {formatDateTimeTH(doc.created_at)}
+      </span>
+    ),
+  },
 ];
 
 export default async function KnowledgeBasePage() {
-  const health = await safe(getHealth());
+  const documents = await safe(listKbDocuments({ limit: DOCUMENT_LIMIT }));
 
   return (
     <div>
       <PageHeader
         title="คลังความรู้"
         subtitle="ค้นหาเอกสาร ใบเสนอราคา สัญญา และอีเมลทั้งหมด · Knowledge Base"
-        action={
-          health ? (
-            <Badge variant="green">API พร้อมใช้งาน</Badge>
-          ) : (
-            <Badge variant="neutral">API ยังไม่เชื่อมต่อ</Badge>
-          )
-        }
       />
 
-      {/*
-        M2 seam: this search box will call GET /v1/kb/search?q=&mode=hybrid
-        (Meilisearch keyword + Qdrant semantic, RRF fusion) via lib/api.ts once
-        the knowledge-base service ships. Nothing is wired yet on purpose.
-      */}
-      <Card>
-        <CardContent>
-          <div className="flex flex-col gap-3 sm:flex-row">
-            <div className="relative flex-1">
-              <Search
-                size={18}
-                className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"
-              />
-              <input
-                type="search"
-                placeholder="ค้นหาเอกสาร เช่น ใบเสนอราคางานไฟฟ้า Lipa Noi..."
-                aria-label="ค้นหาคลังความรู้"
-                className="h-12 w-full rounded-xl border border-slate-200 bg-slate-50 pl-11 pr-4 text-sm text-slate-700 placeholder:text-slate-400 focus:border-blue-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-100"
-              />
-            </div>
-            <Button disabled title="การค้นหาแบบไฮบริดจะเปิดใช้ใน M2">
-              ค้นหา
-            </Button>
-          </div>
-          <div className="mt-4 flex flex-wrap gap-2">
-            {DOC_KINDS.map(({ icon: Icon, label }) => (
-              <span
-                key={label}
-                className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-500"
-              >
-                <Icon size={13} />
-                {label}
-              </span>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+      <div className="space-y-6">
+        {/* Hybrid search — client-side, calls GET /v1/kb/search on submit. */}
+        <KbSearch />
 
-      {/* Results placeholder */}
-      <div className="mt-4 flex flex-col items-center rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center">
-        <div className="rounded-2xl bg-blue-50 p-4 text-blue-500">
-          <BookOpen size={28} />
-        </div>
-        <h2 className="mt-4 text-base font-semibold text-slate-900">
-          การค้นหาแบบไฮบริดจะเปิดใช้ใน M2
-        </h2>
-        <p className="mt-1 max-w-md text-sm text-slate-500">
-          เอกสารทั้งหมด — ใบเสนอราคา MR.HOME สัญญา รูปหน้างาน และอีเมล — จะถูกจัดทำดัชนีด้วย
-          Meilisearch + Qdrant แล้วค้นหาได้จากช่องนี้พร้อมอ้างอิงแหล่งที่มา
-        </p>
+        <Card>
+          <CardHeader
+            title="อัปโหลดเอกสาร"
+            subtitle="ไฟล์จะถูกอ่าน (OCR ถ้าเป็นรูป/สแกน) แล้วจัดทำดัชนีให้ค้นหาได้อัตโนมัติ"
+          />
+          <CardContent>
+            <KbUploadForm />
+          </CardContent>
+        </Card>
+
+        {documents === null ? (
+          <EmptyState />
+        ) : (
+          <Card>
+            <CardHeader
+              title="เอกสารล่าสุด"
+              subtitle="เรียงจากรายการล่าสุด"
+              action={
+                <div className="flex items-center gap-2">
+                  <Badge variant="blue">{documents.length} รายการ</Badge>
+                  <KbRefreshButton />
+                </div>
+              }
+            />
+            <CardContent>
+              <DataTable
+                columns={COLUMNS}
+                rows={documents}
+                rowKey={(doc) => doc.id}
+                emptyText="ยังไม่มีเอกสารในคลัง — อัปโหลดไฟล์แรกด้านบนเพื่อเริ่มต้น"
+              />
+            </CardContent>
+          </Card>
+        )}
       </div>
     </div>
   );

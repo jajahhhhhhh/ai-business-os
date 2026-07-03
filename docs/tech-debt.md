@@ -11,3 +11,4 @@ debt without a trigger is a wish, not a plan.
 | TD-4 | <a id="pricing"></a>Model pricing table hand-maintained in router.py | No pricing API worth the dependency | Pricing drift found by weekly CI check |
 | TD-5 | Auth: dev-mode bypass + API keys only; no Auth.js session flow | M0 has no UI writes needing user identity | M1 renovation module UI |
 | TD-6 | Locale toggle in dashboard is visual only | Thai-only owner today | First non-Thai user |
+| TD-7 | KB hybrid search fuses with RRF only — no cross-encoder reranker (ARCHITECTURE.md §10 plans bge-reranker over the top-20) | Reranker adds a second heavyweight model download + inference latency; RRF alone is adequate for M2's corpus size (tens of documents) | KB exceeds ~1k documents, or owner reports irrelevant top-5 results |

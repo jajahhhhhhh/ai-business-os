@@ -5,6 +5,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+### Added — M2 Knowledge base + memory
+- Document ingestion pipeline: upload (25 MB cap) → MinIO original → text
+  extraction (PDF via pdfplumber, Thai OCR fallback via Tesseract, images,
+  plain text with TIS-620 fallback) → Thai-aware chunking (~512-token target)
+  → Meilisearch keyword index + Qdrant bge-m3 embeddings. Celery-dispatched
+  with in-process fallback when the broker is down.
+- Hybrid search (`GET /v1/kb/search`): keyword + semantic fused with RRF;
+  degrades to keyword-only (flagged) when the vector side is unavailable.
+- Long-term memory (`/v1/memory`): remember/recall/consolidate — semantic +
+  ILIKE recall fusion, Sunday 03:00 consolidation task merging near-duplicates
+  (embedding similarity ≥ 0.92, never across kinds) and expiring stale rows.
+- MCP servers `knowledge-base` (search, ingest_document, get_document,
+  list_documents) and `memory` (remember, recall, consolidate).
+- คลังความรู้ dashboard page: hybrid search with mode toggle, upload with
+  ingest-status tracking, document table with OCR/embedding indicators.
+- Embeddings ship as an optional `[ml]` extra (torch-free installs keep
+  working); bge-m3 weights cached in the shared `hf_models` compose volume.
+
 ### Added — M1 Renovation module
 - Thai bank-alert ingestion: parser for KBank/SCB/Bangkok Bank/Krungsri/KTB
   e-mail formats (Buddhist-era dates, satang, OTP/marketing rejection),

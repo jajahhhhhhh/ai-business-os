@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     s3_endpoint: str = "http://localhost:9000"
     s3_bucket: str = "aibos"
 
+    # Knowledge base (M2).
+    embedding_model: str = "BAAI/bge-m3"
+    kb_max_upload_mb: int = 25
+
     # Secrets: default empty; access through `require()` when actually needed.
     meili_master_key: str = ""
     s3_access_key: str = ""

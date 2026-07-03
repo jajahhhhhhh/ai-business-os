@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI
 
 from src.config import Settings, get_settings
+from src.infrastructure.adapters import KbAdapters, build_kb_adapters
 from src.infrastructure.db import build_engine, build_sessionmaker
 from src.interfaces.dependencies import require_principal
 from src.interfaces.middleware import RequestContextMiddleware
@@ -17,7 +18,9 @@ from src.interfaces.routers import (
     competitors,
     health,
     jobs,
+    kb,
     leads,
+    memory,
     metrics,
     renovation,
     reports,
@@ -31,7 +34,12 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     await app.state.engine.dispose()
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None, *, kb_adapters: KbAdapters | None = None
+) -> FastAPI:
+    """Build the app. `kb_adapters` is the M2 test seam: integration tests
+    inject in-memory fakes (tests/fakes.py) so they run with only PostgreSQL
+    available; production wiring comes from build_kb_adapters(settings)."""
     settings = settings or get_settings()
     configure_logging(settings)
 
@@ -47,6 +55,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # keeps request dependencies simple even when the lifespan never runs.
     app.state.engine = build_engine(settings.database_url)
     app.state.sessionmaker = build_sessionmaker(app.state.engine)
+    app.state.kb_adapters = kb_adapters or build_kb_adapters(settings)
 
     app.add_middleware(RequestContextMiddleware)
     register_exception_handlers(app)
@@ -63,6 +72,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(agents.router, prefix="/v1", dependencies=auth)
     app.include_router(reports.router, prefix="/v1", dependencies=auth)
     app.include_router(jobs.router, prefix="/v1", dependencies=auth)
+    app.include_router(kb.router, prefix="/v1", dependencies=auth)
+    app.include_router(memory.router, prefix="/v1", dependencies=auth)
 
     return app
 

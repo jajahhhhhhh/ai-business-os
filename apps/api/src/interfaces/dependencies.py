@@ -12,6 +12,7 @@ from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import Settings
+from src.infrastructure.adapters import KbAdapters
 from src.infrastructure.models import ApiKey
 from src.infrastructure.security import hash_api_key
 from src.interfaces.problems import ProblemError
@@ -42,8 +43,15 @@ async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
             raise
 
 
+def get_kb_adapters(request: Request) -> KbAdapters:
+    """The KB/memory gateway set built by create_app (fakes in tests)."""
+    adapters: KbAdapters = request.app.state.kb_adapters
+    return adapters
+
+
 SettingsDep = Annotated[Settings, Depends(get_app_settings)]
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+KbAdaptersDep = Annotated[KbAdapters, Depends(get_kb_adapters)]
 
 
 def _unauthorized(detail: str) -> ProblemError:

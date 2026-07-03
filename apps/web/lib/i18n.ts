@@ -11,6 +11,8 @@ import type {
   ChangeSeverity,
   DrawRowStatus,
   DrawStatus,
+  KbDocumentStatus,
+  KbSearchMode,
   LeadKind,
   LeadStage,
   MilestoneStatus,
@@ -115,6 +117,31 @@ export const MILESTONE_STATUS_LABELS: Record<MilestoneStatus, LocalizedText> = {
   done: { th: "เสร็จแล้ว", en: "Done" },
   delayed: { th: "ล่าช้า", en: "Delayed" },
 };
+
+export const KB_DOC_STATUS_LABELS: Record<KbDocumentStatus, LocalizedText> = {
+  pending: { th: "รอประมวลผล", en: "Pending" },
+  parsing: { th: "กำลังอ่าน", en: "Parsing" },
+  indexed: { th: "พร้อมค้นหา", en: "Ready" },
+  failed: { th: "ล้มเหลว", en: "Failed" },
+};
+
+export const KB_SEARCH_MODE_LABELS: Record<KbSearchMode, LocalizedText> = {
+  hybrid: { th: "ไฮบริด", en: "Hybrid" },
+  keyword: { th: "คีย์เวิร์ด", en: "Keyword" },
+  semantic: { th: "ความหมาย", en: "Semantic" },
+};
+
+const KB_MATCHED_BY_LABELS: Record<string, LocalizedText> = {
+  keyword: { th: "คีย์เวิร์ด", en: "Keyword" },
+  vector: { th: "เวกเตอร์", en: "Vector" },
+  semantic: { th: "เวกเตอร์", en: "Vector" },
+};
+
+/** Thai label for a search-result matched_by value; falls back to the raw value. */
+export function kbMatchedByLabel(value: string, locale: Locale = DEFAULT_LOCALE): string {
+  const entry = KB_MATCHED_BY_LABELS[value.toLowerCase()];
+  return entry ? entry[locale] : value;
+}
 
 export const RUN_STATUS_LABELS: Record<AgentRunStatus, LocalizedText> = {
   queued: { th: "รอคิว", en: "Queued" },
