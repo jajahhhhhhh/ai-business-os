@@ -34,6 +34,8 @@ TRIGGERS: dict[str, tuple[str, str]] = {
     "memory-consolidate": ("memory", "consolidate"),
     "memory-capture": ("memory", "capture-signals"),
     "qa-evaluate": ("qa", "evaluate"),
+    # M5: sweep every enabled lead source through the discovery pipeline.
+    "customer-discovery": ("customer-discovery", "discover-all"),
 }
 
 

@@ -27,6 +27,7 @@ def test_trigger_registry_matches_the_web_contract_exactly() -> None:
         "memory-consolidate",
         "memory-capture",
         "qa-evaluate",
+        "customer-discovery",
     }
 
 

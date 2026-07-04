@@ -5,6 +5,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+### Added — M5 Lead discovery
+- Compliant lead sources: Reddit via the official API only (app-only OAuth,
+  honest User-Agent, `skipped: no credentials` — never HTML scraping) and RSS
+  feeds; registry endpoints with blocklist refusal at registration; three
+  Samui subreddits seeded.
+- Customer Discovery agent (tier LOW, budget-capped): keyword prefilter (zero
+  LLM spend on noise) → batched LLM classify/score with deterministic §8.3
+  fallback → dedup (exact hash + embedding ≥0.92 → "reobserved") → leads with
+  score features, Thai follow-up suggestions, and full event timelines.
+- PDPA: contact = platform/handle/url only, Fernet-encrypted at rest
+  (`PII_ENCRYPTION_KEY`); 18-month inactivity anonymization + weekly greedy
+  embedding clustering (Sun beats).
+- CRM board: 5-stage pipeline with allowed-transition advances, kind/score/q
+  filters, lead detail page (decrypted contact, suggestion copy, score
+  features, timeline), source management UI.
+
 ### Added — M4 Agent runtime + QA
 - Orchestrator wired into production: agent runs execute through the traced,
   budgeted Runner (retry → escalate to LINE → park, never silently dropped);

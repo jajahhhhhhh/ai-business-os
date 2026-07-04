@@ -29,6 +29,7 @@ from src.interfaces.routers import (
     metrics,
     renovation,
     reports,
+    sources,
 )
 from src.logging_setup import configure_logging
 
@@ -90,6 +91,7 @@ def create_app(
     app.include_router(renovation.router, prefix="/v1", dependencies=auth)
     app.include_router(leads.router, prefix="/v1", dependencies=auth)
     app.include_router(competitors.router, prefix="/v1", dependencies=auth)
+    app.include_router(sources.router, prefix="/v1", dependencies=auth)
     app.include_router(agents.router, prefix="/v1", dependencies=auth)
     app.include_router(reports.router, prefix="/v1", dependencies=auth)
     app.include_router(jobs.router, prefix="/v1", dependencies=auth)

@@ -15,6 +15,7 @@ from decimal import Decimal
 from typing import Protocol
 
 from src.application.agents.planning import PlannerInputs
+from src.application.lead_discovery import DiscoveryStats
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,3 +129,17 @@ class QaGateway(Protocol):
     async def write_eval(
         self, *, run_id: uuid.UUID, rubric: str, score: int, notes: str
     ) -> None: ...
+
+
+class CustomerDiscoveryGateway(Protocol):
+    """M5 lead discovery over LeadDiscoveryUseCases.
+
+    The agent hands its budget-aware AgentLlm down so classification spend is
+    booked on the run (Runner + SqlDailyBudget); llm=None means every batch
+    scores through the deterministic §8.3 rules."""
+
+    async def discover_source(
+        self, source_id: uuid.UUID, llm: AgentLlm | None
+    ) -> DiscoveryStats: ...
+
+    async def discover_all(self, llm: AgentLlm | None) -> DiscoveryStats: ...

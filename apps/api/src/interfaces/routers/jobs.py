@@ -32,6 +32,10 @@ DISPATCHABLE: dict[str, tuple[str, tuple[str, ...]]] = {
     "memory_capture_signals": ("src.worker.run_agent_task", ("memory", "capture-signals")),
     "planner_weekly_plan": ("src.worker.run_agent_task", ("planner", "weekly-plan")),
     "qa_evaluate": ("src.worker.run_agent_task", ("qa", "evaluate")),
+    # M5 lead discovery jobs.
+    "collect_all_lead_sources": ("src.worker.collect_all_lead_sources", ()),
+    "cluster_leads": ("src.worker.cluster_leads", ()),
+    "anonymize_stale_leads": ("src.worker.anonymize_stale_leads", ()),
 }
 
 

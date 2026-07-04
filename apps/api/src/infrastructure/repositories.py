@@ -31,9 +31,11 @@ from src.infrastructure.models import (
     Job,
     Lead,
     LeadEvent,
+    LeadScore,
     Memory,
     Milestone,
     Quotation,
+    RawDocument,
     Report,
     Site,
     Snapshot,
@@ -475,6 +477,7 @@ class LeadSqlRepository:
         self,
         *,
         stage: LeadStage | None,
+        kind: str | None = None,
         min_score: int | None,
         q: str | None,
         after: Cursor | None,
@@ -483,6 +486,8 @@ class LeadSqlRepository:
         stmt = sa.select(Lead).where(Lead.deleted_at.is_(None))
         if stage is not None:
             stmt = stmt.where(Lead.stage == stage.value)
+        if kind is not None:
+            stmt = stmt.where(Lead.kind == kind)
         if min_score is not None:
             stmt = stmt.where(Lead.intent_score >= min_score)
         if q:
@@ -516,6 +521,26 @@ class LeadSqlRepository:
             )
         )
         await self._session.flush()
+
+    async def list_events(self, lead_id: uuid.UUID, limit: int) -> Sequence[LeadEvent]:
+        stmt = (
+            sa.select(LeadEvent)
+            .where(LeadEvent.lead_id == lead_id)
+            .order_by(
+                LeadEvent.occurred_at.desc(), LeadEvent.created_at.desc(), LeadEvent.id.desc()
+            )
+            .limit(limit)
+        )
+        return (await self._session.execute(stmt)).scalars().all()
+
+    async def latest_score(self, lead_id: uuid.UUID) -> LeadScore | None:
+        stmt = (
+            sa.select(LeadScore)
+            .where(LeadScore.lead_id == lead_id)
+            .order_by(LeadScore.scored_at.desc(), LeadScore.created_at.desc())
+            .limit(1)
+        )
+        return (await self._session.execute(stmt)).scalar_one_or_none()
 
 
 class CompetitorSqlRepository:
@@ -1158,3 +1183,272 @@ class MemorySqlRepository:
         if not memory_ids:
             return
         await self._session.execute(sa.delete(Memory).where(Memory.id.in_(list(memory_ids))))
+
+
+# ------------------------------------------------------------ M5 lead discovery
+
+
+class LeadSourceSqlRepository:
+    """Registry CRUD over generic lead sources (competitor_id IS NULL)."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def list_lead_sources(self) -> Sequence[Source]:
+        stmt = (
+            sa.select(Source)
+            .where(Source.competitor_id.is_(None))
+            .order_by(Source.created_at.desc(), Source.id.desc())
+        )
+        return (await self._session.execute(stmt)).scalars().all()
+
+    async def get_source(self, source_id: uuid.UUID) -> Source | None:
+        return await self._session.get(Source, source_id)
+
+    async def create_lead_source(
+        self,
+        *,
+        name: str,
+        type: str,  # noqa: A002 - mirrors the column name
+        url: str | None,
+        config: dict[str, Any] | None,
+        rate_limit_per_hr: int,
+    ) -> Source:
+        source = Source(
+            name=name,
+            type=type,
+            url=url,
+            config_json=config,
+            competitor_id=None,
+            rate_limit_per_hr=rate_limit_per_hr,
+            tos_policy="allowed",
+            robots_ok=True,
+            enabled=True,
+        )
+        self._session.add(source)
+        await self._session.flush()
+        await self._session.refresh(source)
+        return source
+
+    async def update_source(self, source_id: uuid.UUID, changes: dict[str, Any]) -> Source:
+        source = await self._session.get(Source, source_id)
+        assert source is not None  # existence checked by the use case
+        for key, value in changes.items():
+            setattr(source, key, value)
+        await self._session.flush()
+        await self._session.refresh(source)
+        return source
+
+    async def delete_source(self, source_id: uuid.UUID) -> None:
+        source = await self._session.get(Source, source_id)
+        if source is None:
+            return
+        await self._session.delete(source)
+        await self._session.flush()
+
+
+class LeadDiscoverySqlRepository:
+    """Persistence surface of the M5 discovery pipeline."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get_source(self, source_id: uuid.UUID) -> Source | None:
+        return await self._session.get(Source, source_id)
+
+    async def enabled_lead_sources(self) -> Sequence[Source]:
+        stmt = (
+            sa.select(Source)
+            .where(Source.competitor_id.is_(None), Source.enabled.is_(True))
+            .order_by(Source.created_at, Source.id)
+        )
+        return (await self._session.execute(stmt)).scalars().all()
+
+    async def set_source_result(
+        self, source_id: uuid.UUID, status: str, checked_at: datetime | None
+    ) -> None:
+        source = await self._session.get(Source, source_id)
+        if source is None:  # deleted mid-run; nothing to record
+            return
+        source.last_status = status
+        if checked_at is not None:
+            source.last_checked_at = checked_at
+        await self._session.flush()
+
+    async def raw_document_exists(self, source_id: uuid.UUID, content_hash: str) -> bool:
+        stmt = sa.select(sa.func.count(RawDocument.id)).where(
+            RawDocument.source_id == source_id, RawDocument.content_hash == content_hash
+        )
+        return int((await self._session.execute(stmt)).scalar_one()) > 0
+
+    async def create_raw_document(
+        self, *, source_id: uuid.UUID, content_hash: str, storage_key: str, status: str
+    ) -> RawDocument:
+        raw = RawDocument(
+            source_id=source_id,
+            content_hash=content_hash,
+            storage_key=storage_key,
+            status=status,
+        )
+        self._session.add(raw)
+        await self._session.flush()
+        await self._session.refresh(raw)
+        return raw
+
+    async def set_raw_document_status(self, raw_id: uuid.UUID, status: str) -> None:
+        raw = await self._session.get(RawDocument, raw_id)
+        if raw is None:
+            return
+        raw.status = status
+        await self._session.flush()
+
+    async def find_lead_by_dedup(self, dedup_hash: str) -> Lead | None:
+        stmt = sa.select(Lead).where(Lead.dedup_hash == dedup_hash, Lead.deleted_at.is_(None))
+        return (await self._session.execute(stmt)).scalar_one_or_none()
+
+    async def get_lead(self, lead_id: uuid.UUID) -> Lead | None:
+        stmt = sa.select(Lead).where(Lead.id == lead_id, Lead.deleted_at.is_(None))
+        return (await self._session.execute(stmt)).scalar_one_or_none()
+
+    async def create_lead(
+        self,
+        *,
+        source_id: uuid.UUID,
+        kind: str,
+        name: str,
+        contact_json: dict[str, Any] | None,
+        locale: str | None,
+        intent_score: int,
+        dedup_hash: str,
+        first_seen_at: datetime,
+    ) -> Lead:
+        lead = Lead(
+            source_id=source_id,
+            kind=kind,
+            name=name,
+            contact_json=contact_json,
+            locale=locale,
+            intent_score=intent_score,
+            stage="discovered",
+            dedup_hash=dedup_hash,
+            first_seen_at=first_seen_at,
+            last_activity_at=first_seen_at,
+        )
+        self._session.add(lead)
+        await self._session.flush()
+        await self._session.refresh(lead)
+        return lead
+
+    async def touch_lead(self, lead_id: uuid.UUID, activity_at: datetime) -> None:
+        lead = await self._session.get(Lead, lead_id)
+        if lead is None:
+            return
+        lead.last_activity_at = activity_at
+        await self._session.flush()
+
+    async def add_lead_event(
+        self,
+        lead_id: uuid.UUID,
+        event_type: str,
+        payload: dict[str, Any] | None,
+        occurred_at: datetime,
+    ) -> None:
+        self._session.add(
+            LeadEvent(
+                lead_id=lead_id, type=event_type, payload_json=payload, occurred_at=occurred_at
+            )
+        )
+        await self._session.flush()
+
+    async def add_lead_score(
+        self,
+        lead_id: uuid.UUID,
+        *,
+        model_version: str,
+        score: int,
+        features: dict[str, Any] | None,
+        scored_at: datetime,
+    ) -> None:
+        self._session.add(
+            LeadScore(
+                lead_id=lead_id,
+                model_version=model_version,
+                score=score,
+                features_json=features,
+                scored_at=scored_at,
+            )
+        )
+        await self._session.flush()
+
+
+class LeadMaintenanceSqlRepository:
+    """Weekly clustering + PDPA anonymization surface (M5)."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def leads_for_clustering(self) -> list[tuple[uuid.UUID, str]]:
+        leads_stmt = (
+            sa.select(Lead.id, Lead.name)
+            .where(Lead.deleted_at.is_(None))
+            .order_by(Lead.created_at, Lead.id)
+        )
+        lead_rows = (await self._session.execute(leads_stmt)).all()
+        if not lead_rows:
+            return []
+        ids = [row.id for row in lead_rows]
+        events_stmt = (
+            sa.select(LeadEvent.lead_id, LeadEvent.payload_json)
+            .where(LeadEvent.lead_id.in_(ids), LeadEvent.type == "discovered")
+            .order_by(LeadEvent.occurred_at.desc())
+        )
+        excerpts: dict[uuid.UUID, str] = {}
+        for row in (await self._session.execute(events_stmt)).all():
+            if row.lead_id in excerpts:
+                continue  # newest-first: keep the freshest excerpt
+            payload = row.payload_json or {}
+            value = payload.get("excerpt")
+            if isinstance(value, str):
+                excerpts[row.lead_id] = value
+        return [(row.id, f"{row.name} {excerpts.get(row.id, '')}".strip()) for row in lead_rows]
+
+    async def set_cluster_ids(self, mapping: dict[uuid.UUID, uuid.UUID]) -> None:
+        for lead_id, cluster_id in mapping.items():
+            await self._session.execute(
+                sa.update(Lead).where(Lead.id == lead_id).values(cluster_id=cluster_id)
+            )
+        await self._session.flush()
+
+    async def stale_leads(self, cutoff: datetime, *, exclude_name: str) -> Sequence[Lead]:
+        activity = sa.func.coalesce(Lead.last_activity_at, Lead.first_seen_at)
+        stmt = (
+            sa.select(Lead)
+            .where(
+                Lead.deleted_at.is_(None),
+                Lead.stage != "won",
+                activity < cutoff,
+                sa.or_(Lead.contact_json.is_not(None), Lead.name != exclude_name),
+            )
+            .order_by(Lead.created_at, Lead.id)
+        )
+        return (await self._session.execute(stmt)).scalars().all()
+
+    async def anonymize_lead(self, lead_id: uuid.UUID, name: str) -> None:
+        await self._session.execute(
+            sa.update(Lead).where(Lead.id == lead_id).values(name=name, contact_json=None)
+        )
+        await self._session.flush()
+
+    async def add_lead_event(
+        self,
+        lead_id: uuid.UUID,
+        event_type: str,
+        payload: dict[str, Any] | None,
+        occurred_at: datetime,
+    ) -> None:
+        self._session.add(
+            LeadEvent(
+                lead_id=lead_id, type=event_type, payload_json=payload, occurred_at=occurred_at
+            )
+        )
+        await self._session.flush()

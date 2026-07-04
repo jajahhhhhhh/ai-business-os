@@ -277,6 +277,8 @@ class LeadRow(Protocol):
     @property
     def name(self) -> str: ...
     @property
+    def contact_json(self) -> dict[str, Any] | None: ...
+    @property
     def locale(self) -> str | None: ...
     @property
     def intent_score(self) -> int: ...
@@ -288,6 +290,26 @@ class LeadRow(Protocol):
     def last_activity_at(self) -> datetime | None: ...
     @property
     def created_at(self) -> datetime: ...
+
+
+class LeadEventRow(Protocol):
+    @property
+    def type(self) -> str: ...
+    @property
+    def payload_json(self) -> dict[str, Any] | None: ...
+    @property
+    def occurred_at(self) -> datetime: ...
+
+
+class LeadScoreRow(Protocol):
+    @property
+    def model_version(self) -> str: ...
+    @property
+    def score(self) -> int: ...
+    @property
+    def features_json(self) -> dict[str, Any] | None: ...
+    @property
+    def scored_at(self) -> datetime: ...
 
 
 # ---------------------------------------------------------- M3 competitor intel
@@ -573,6 +595,7 @@ class LeadRepository(Protocol):
         self,
         *,
         stage: LeadStage | None,
+        kind: str | None,
         min_score: int | None,
         q: str | None,
         after: Cursor | None,
@@ -582,6 +605,142 @@ class LeadRepository(Protocol):
         self, lead_id: uuid.UUID, stage: LeadStage, activity_at: datetime
     ) -> LeadRow: ...
     async def add_event(
+        self,
+        lead_id: uuid.UUID,
+        event_type: str,
+        payload: dict[str, Any] | None,
+        occurred_at: datetime,
+    ) -> None: ...
+    async def list_events(self, lead_id: uuid.UUID, limit: int) -> Sequence[LeadEventRow]:
+        """Newest-first events for the lead detail view."""
+        ...
+
+    async def latest_score(self, lead_id: uuid.UUID) -> LeadScoreRow | None: ...
+
+
+# ------------------------------------------------------------ M5 lead discovery
+
+
+class LeadSourceRow(Protocol):
+    """A generic lead source (sources row with competitor_id IS NULL)."""
+
+    @property
+    def id(self) -> uuid.UUID: ...
+    @property
+    def name(self) -> str: ...
+    @property
+    def type(self) -> str: ...
+    @property
+    def url(self) -> str | None: ...
+    @property
+    def config_json(self) -> dict[str, Any] | None: ...
+    @property
+    def tos_policy(self) -> str: ...
+    @property
+    def rate_limit_per_hr(self) -> int: ...
+    @property
+    def enabled(self) -> bool: ...
+    @property
+    def competitor_id(self) -> uuid.UUID | None: ...
+    @property
+    def last_checked_at(self) -> datetime | None: ...
+    @property
+    def last_status(self) -> str | None: ...
+    @property
+    def created_at(self) -> datetime: ...
+
+
+class RawLeadDocumentRow(Protocol):
+    @property
+    def id(self) -> uuid.UUID: ...
+    @property
+    def status(self) -> str: ...
+
+
+class LeadSourceRepository(Protocol):
+    """Registry CRUD over generic lead sources (competitor_id IS NULL)."""
+
+    async def list_lead_sources(self) -> Sequence[LeadSourceRow]: ...
+    async def get_source(self, source_id: uuid.UUID) -> LeadSourceRow | None:
+        """Any sources row (caller checks competitor_id for lead-ownership)."""
+        ...
+
+    async def create_lead_source(
+        self,
+        *,
+        name: str,
+        type: str,  # noqa: A002 - mirrors the column name
+        url: str | None,
+        config: dict[str, Any] | None,
+        rate_limit_per_hr: int,
+    ) -> LeadSourceRow: ...
+    async def update_source(
+        self, source_id: uuid.UUID, changes: dict[str, Any]
+    ) -> LeadSourceRow: ...
+    async def delete_source(self, source_id: uuid.UUID) -> None: ...
+
+
+class LeadDiscoveryRepository(Protocol):
+    """Persistence surface of the M5 discovery pipeline."""
+
+    async def get_source(self, source_id: uuid.UUID) -> LeadSourceRow | None: ...
+    async def enabled_lead_sources(self) -> Sequence[LeadSourceRow]: ...
+    async def set_source_result(
+        self, source_id: uuid.UUID, status: str, checked_at: datetime | None
+    ) -> None: ...
+    async def raw_document_exists(self, source_id: uuid.UUID, content_hash: str) -> bool: ...
+    async def create_raw_document(
+        self, *, source_id: uuid.UUID, content_hash: str, storage_key: str, status: str
+    ) -> RawLeadDocumentRow: ...
+    async def set_raw_document_status(self, raw_id: uuid.UUID, status: str) -> None: ...
+    async def find_lead_by_dedup(self, dedup_hash: str) -> LeadRow | None: ...
+    async def get_lead(self, lead_id: uuid.UUID) -> LeadRow | None: ...
+    async def create_lead(
+        self,
+        *,
+        source_id: uuid.UUID,
+        kind: str,
+        name: str,
+        contact_json: dict[str, Any] | None,
+        locale: str | None,
+        intent_score: int,
+        dedup_hash: str,
+        first_seen_at: datetime,
+    ) -> LeadRow: ...
+    async def touch_lead(self, lead_id: uuid.UUID, activity_at: datetime) -> None: ...
+    async def add_lead_event(
+        self,
+        lead_id: uuid.UUID,
+        event_type: str,
+        payload: dict[str, Any] | None,
+        occurred_at: datetime,
+    ) -> None: ...
+    async def add_lead_score(
+        self,
+        lead_id: uuid.UUID,
+        *,
+        model_version: str,
+        score: int,
+        features: dict[str, Any] | None,
+        scored_at: datetime,
+    ) -> None: ...
+
+
+class LeadMaintenanceRepository(Protocol):
+    """Weekly clustering + PDPA anonymization surface (M5)."""
+
+    async def leads_for_clustering(self) -> Sequence[tuple[uuid.UUID, str]]:
+        """(lead_id, text) for active leads; text = name + discovered excerpt."""
+        ...
+
+    async def set_cluster_ids(self, mapping: dict[uuid.UUID, uuid.UUID]) -> None: ...
+    async def stale_leads(self, cutoff: datetime, *, exclude_name: str) -> Sequence[LeadRow]:
+        """Leads inactive since `cutoff` (fallback first_seen_at), stage != 'won',
+        not already anonymized (name != exclude_name or contact still present)."""
+        ...
+
+    async def anonymize_lead(self, lead_id: uuid.UUID, name: str) -> None: ...
+    async def add_lead_event(
         self,
         lead_id: uuid.UUID,
         event_type: str,

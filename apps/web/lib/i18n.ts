@@ -18,6 +18,7 @@ import type {
   KbDocumentStatus,
   KbSearchMode,
   LeadKind,
+  LeadSourceType,
   LeadStage,
   MilestoneStatus,
   ReportKind,
@@ -68,6 +69,49 @@ export const LEAD_KIND_LABELS: Record<LeadKind, LocalizedText> = {
   longstay: { th: "พักระยะยาว", en: "Long-stay" },
   b2b: { th: "ธุรกิจ (B2B)", en: "B2B" },
   supplier: { th: "ซัพพลายเออร์", en: "Supplier" },
+};
+
+/**
+ * Lead timeline event types (GET /v1/leads/{id} events). `type` is a free
+ * string on the API — always resolve through leadEventLabel().
+ */
+export const LEAD_EVENT_LABELS: Record<string, LocalizedText> = {
+  discovered: { th: "พบครั้งแรก", en: "Discovered" },
+  reobserved: { th: "พบซ้ำ", en: "Re-observed" },
+  classified: { th: "วิเคราะห์แล้ว", en: "Classified" },
+  stage_changed: { th: "เปลี่ยนสถานะ", en: "Stage changed" },
+  anonymized: { th: "ลบข้อมูลแล้ว", en: "Anonymized" },
+};
+
+/** Thai label for a lead event type; falls back to the raw value. */
+export function leadEventLabel(type: string, locale: Locale = DEFAULT_LOCALE): string {
+  const entry = LEAD_EVENT_LABELS[type.toLowerCase()];
+  return entry ? entry[locale] : type;
+}
+
+/**
+ * Known intent-score feature keys (GET /v1/leads/{id} score.features) —
+ * unknown keys fall back to the raw key via leadFeatureLabel().
+ */
+export const LEAD_FEATURE_LABELS: Record<string, LocalizedText> = {
+  recency: { th: "ความใหม่ของโพสต์", en: "Recency" },
+  explicit_intent: { th: "ระบุความต้องการชัดเจน", en: "Explicit intent" },
+  dates_mentioned: { th: "ระบุวันเข้าพัก", en: "Dates mentioned" },
+  budget_signal: { th: "สัญญาณงบประมาณ", en: "Budget signal" },
+  group_size: { th: "ขนาดกลุ่ม", en: "Group size" },
+  language: { th: "ภาษา", en: "Language" },
+};
+
+/** Thai label for a score feature key; falls back to the raw key. */
+export function leadFeatureLabel(key: string, locale: Locale = DEFAULT_LOCALE): string {
+  const entry = LEAD_FEATURE_LABELS[key.toLowerCase()];
+  return entry ? entry[locale] : key;
+}
+
+/** Lead discovery source types (GET /v1/sources). */
+export const LEAD_SOURCE_TYPE_LABELS: Record<LeadSourceType, LocalizedText> = {
+  reddit: { th: "Reddit", en: "Reddit" },
+  rss: { th: "RSS", en: "RSS" },
 };
 
 export const SEVERITY_LABELS: Record<ChangeSeverity, LocalizedText> = {

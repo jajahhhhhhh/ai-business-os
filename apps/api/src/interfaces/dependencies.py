@@ -5,10 +5,11 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Any
 
 if TYPE_CHECKING:  # imported lazily at runtime (orchestrator dependency)
     from src.infrastructure.agent_runtime import AgentRuntime
+    from src.infrastructure.pii import PiiCipher
 
 import sqlalchemy as sa
 from fastapi import Depends, Request
@@ -74,10 +75,25 @@ def get_agent_runtime(request: Request) -> AgentRuntime:
     return runtime
 
 
+def get_pii_cipher(request: Request) -> PiiCipher:
+    """The M5 lead-contact cipher, built lazily once per app (the derived-key
+    warning then fires at most once per process — 'startup warning')."""
+    cipher = getattr(request.app.state, "pii_cipher", None)
+    if cipher is None:
+        from src.infrastructure.pii import PiiCipher
+
+        cipher = PiiCipher.from_settings(request.app.state.settings)
+        request.app.state.pii_cipher = cipher
+    return cipher
+
+
 SettingsDep = Annotated[Settings, Depends(get_app_settings)]
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 KbAdaptersDep = Annotated[KbAdapters, Depends(get_kb_adapters)]
 CompetitorAdaptersDep = Annotated[CompetitorAdapters, Depends(get_competitor_adapters)]
+# Annotated[Any, ...]: the concrete PiiCipher type stays off the import path
+# (cryptography loads lazily); FastAPI only needs the Depends marker.
+PiiCipherDep = Annotated[Any, Depends(get_pii_cipher)]
 
 
 def _unauthorized(detail: str) -> ProblemError:

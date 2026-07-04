@@ -128,14 +128,27 @@ class ComplianceGate:
         if policy.tos_policy is not TosPolicy.ALLOWED:
             raise ComplianceViolation("tos_policy", f"{policy.name} is {policy.tos_policy}")
 
-    async def fetch(self, policy: SourcePolicy, url: str) -> str:
-        """Fetch ``url`` if and only if every compliance check passes."""
+    async def fetch(
+        self,
+        policy: SourcePolicy,
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+        check_robots: bool = True,
+    ) -> str:
+        """Fetch ``url`` if and only if every compliance check passes.
+
+        ``check_robots=False`` is reserved for official API endpoints
+        (e.g. oauth.reddit.com): those are governed by the platform's API
+        terms and rate limits, not robots.txt. The ToS-policy check and the
+        per-source rate limit always apply. ``headers`` carries API auth.
+        """
         self.check_url(policy, url)
         if not self._limiter.acquire(policy.name, policy.rate_limit_per_hr):
             raise ComplianceViolation("rate_limited", policy.name)
-        if not await self._robots_allows(url):
+        if check_robots and not await self._robots_allows(url):
             raise ComplianceViolation("robots_txt", url)
-        resp = await self._client.get(url)
+        resp = await self._client.get(url, headers=headers)
         resp.raise_for_status()
         return resp.text
 

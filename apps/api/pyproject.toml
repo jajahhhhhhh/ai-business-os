@@ -21,6 +21,10 @@ dependencies = [
     # M4: prompt templates (packages/prompts *.j2) render via Jinja2; a core
     # dep (not optional) because the ChangeAnalyst prompt path uses it too.
     "jinja2>=3.1",
+    # M5: leads.contact_json PII encryption (Fernet) — core dep, imported by
+    # the leads router. NOTE for the integrator's Dockerfile: cryptography
+    # ships manylinux wheels, so the slim image needs no extra build deps.
+    "cryptography>=43",
 ]
 
 # M4 NOTE: the agent runtime (src/infrastructure/agent_runtime.py and

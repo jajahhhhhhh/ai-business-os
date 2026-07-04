@@ -51,6 +51,30 @@ class ComplianceRefusedError(ApplicationError):
         super().__init__(f"Refused by compliance gate ({reason}): {detail}")
 
 
+class LeadSourceInvalidError(ApplicationError):
+    """A lead-source registration/update is structurally invalid (M5).
+
+    Distinct from ComplianceRefusedError (§8.4 policy refusals): this covers
+    shape problems — rss without a url, reddit without config.subreddit.
+    Maps to HTTP 422 with a Thai-readable detail (problems.py).
+    """
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+
+
+class CollectorNotConfiguredError(ApplicationError):
+    """A collector's credentials are missing (e.g. Reddit API keys).
+
+    The discovery pipeline records 'skipped: no credentials' on the source
+    and moves on — per §8.4 there is never a scrape-without-API fallback.
+    """
+
+    def __init__(self, source_type: str) -> None:
+        self.source_type = source_type
+        super().__init__(f"{source_type} collector is not configured (missing credentials)")
+
+
 class UnrecognizedBankAlertError(ApplicationError):
     """Ingested text could not be parsed as a bank transaction alert."""
 

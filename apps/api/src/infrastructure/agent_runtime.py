@@ -45,6 +45,7 @@ from orchestrator.runner import Runner, RunRecord
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.application.agents.analytics import AnalyticsAgent
+from src.application.agents.customer_discovery import CustomerDiscoveryAgent
 from src.application.agents.memory import MemoryAgent
 from src.application.agents.planner import PlannerAgent
 from src.application.agents.planning import CompetitorSignal, PlannerInputs
@@ -58,11 +59,16 @@ from src.application.agents.ports import (
 from src.application.agents.qa import QaAgent
 from src.application.bank_transactions import MATCHED
 from src.application.competitor_intel import CompetitorIntelUseCases
+from src.application.lead_discovery import DiscoveryStats, LeadDiscoveryUseCases
 from src.application.memory import MemoryUseCases
 from src.application.snapshot import DailySnapshotUseCases
 from src.config import Settings
 from src.domain.bank_alerts import BANGKOK_TZ
-from src.infrastructure.adapters import CompetitorAdapters, KbAdapters
+from src.infrastructure.adapters import (
+    CompetitorAdapters,
+    KbAdapters,
+    build_lead_collector,
+)
 from src.infrastructure.audit import SqlAuditWriter
 from src.infrastructure.change_analyst import AgentRunRecorder, bangkok_day_start
 from src.infrastructure.line import LineClient
@@ -81,8 +87,10 @@ from src.infrastructure.models import (
     Report,
     Site,
 )
+from src.infrastructure.pii import PiiCipher
 from src.infrastructure.repositories import (
     CompetitorIntelSqlRepository,
+    LeadDiscoverySqlRepository,
     MemorySqlRepository,
     SnapshotSqlRepository,
 )
@@ -94,7 +102,7 @@ _CENT4 = Decimal("0.0001")
 
 ESCALATION_MESSAGE_TH = "เอเจนต์ {name} ล้มเหลว: {reason} — งานถูกพักไว้"
 
-AGENT_NAMES = ("analytics", "planner", "memory", "qa")
+AGENT_NAMES = ("analytics", "planner", "memory", "qa", "customer-discovery")
 
 HIGH_SEVERITIES = ("high", "critical")
 
@@ -553,6 +561,56 @@ class PlannerSqlGateway:
         return _delivered(report, line_sent, body)
 
 
+class LeadDiscoverySqlGateway:
+    """CustomerDiscoveryGateway over LeadDiscoveryUseCases (M5).
+
+    One short-lived session per discover call; per-source failures are
+    absorbed inside the use case (recorded as sources.last_status), so the
+    commit lands whatever the pipeline managed to persist."""
+
+    def __init__(
+        self,
+        *,
+        maker: async_sessionmaker[AsyncSession],
+        settings: Settings,
+        kb_adapters: KbAdapters,
+        competitor_adapters: CompetitorAdapters,
+        collector: Any,
+        actor: str,
+    ) -> None:
+        self._maker = maker
+        self._settings = settings
+        self._kb = kb_adapters
+        self._storage = competitor_adapters.storage
+        self._collector = collector
+        self._actor = actor
+
+    def _use_cases(self, session: AsyncSession) -> LeadDiscoveryUseCases:
+        return LeadDiscoveryUseCases(
+            LeadDiscoverySqlRepository(session),
+            SqlAuditWriter(session),
+            storage=self._storage,
+            collector=self._collector,
+            pii=PiiCipher.from_settings(self._settings),
+            embedder=self._kb.embedder,
+            vector_index=self._kb.vector_index,
+        )
+
+    async def discover_source(self, source_id: uuid.UUID, llm: Any | None) -> DiscoveryStats:
+        async with self._maker() as session:
+            stats = await self._use_cases(session).discover_source(
+                source_id, llm=llm, actor=self._actor
+            )
+            await session.commit()
+        return stats
+
+    async def discover_all(self, llm: Any | None) -> DiscoveryStats:
+        async with self._maker() as session:
+            stats = await self._use_cases(session).discover_all(llm=llm, actor=self._actor)
+            await session.commit()
+        return stats
+
+
 class QaSqlGateway:
     """QaGateway: not-yet-evaluated recent runs + agent_evals writes."""
 
@@ -615,9 +673,12 @@ class AgentRuntime:
     escalator: Any  # orchestrator Escalator
     line_push: Any | None = None
     rng: random.Random | None = None
+    # M5: LeadCollector seam — None in production means "build the compliance
+    # collector lazily from settings" (build_agent); tests inject a fake.
+    lead_collector: Any | None = None
 
     async def aclose(self) -> None:
-        for gateway in (self.llm, self.escalator):
+        for gateway in (self.llm, self.escalator, self.lead_collector):
             aclose = getattr(gateway, "aclose", None)
             if aclose is not None:
                 await aclose()
@@ -635,6 +696,7 @@ def build_agent_runtime(
         ),
         escalator=LineEscalator(line),
         line_push=line.push_text if line.is_configured else None,
+        lead_collector=build_lead_collector(settings),
     )
 
 
@@ -676,6 +738,16 @@ def build_agent(
             daily_budget_usd=cap,
             rng=runtime.rng,
         )
+    if agent_name == "customer-discovery":
+        lead_gateway = LeadDiscoverySqlGateway(
+            maker=maker,
+            settings=settings,
+            kb_adapters=kb_adapters,
+            competitor_adapters=competitor_adapters,
+            collector=runtime.lead_collector or build_lead_collector(settings),
+            actor=actor,
+        )
+        return CustomerDiscoveryAgent(lead_gateway, runtime.llm, daily_budget_usd=cap)
     raise ValueError(f"unknown agent {agent_name!r}")
 
 

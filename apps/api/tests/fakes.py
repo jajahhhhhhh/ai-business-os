@@ -665,6 +665,340 @@ class FakeQaGateway:
         self.evals.append({"run_id": run_id, "rubric": rubric, "score": score, "notes": notes})
 
 
+# ---------------------------------------------------------- M5: lead discovery
+# Fakes for the LeadCollector port and the LeadSource/LeadDiscovery/
+# LeadMaintenance repository protocols (pipeline + registry + maintenance
+# unit tests, and the create_app/AgentRuntime integration seam).
+
+from src.application.errors import CollectorNotConfiguredError  # noqa: E402
+from src.application.lead_discovery import CollectedDoc  # noqa: E402
+
+
+@dataclass
+class FakeLeadSourceRow:
+    id: uuid.UUID
+    name: str
+    type: str
+    url: str | None = None
+    config_json: dict[str, Any] | None = None
+    tos_policy: str = "allowed"
+    rate_limit_per_hr: int = 12
+    enabled: bool = True
+    competitor_id: uuid.UUID | None = None
+    last_checked_at: datetime | None = None
+    last_status: str | None = None
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@dataclass
+class FakeLeadRow:
+    id: uuid.UUID
+    kind: str
+    name: str
+    dedup_hash: str
+    source_id: uuid.UUID | None = None
+    contact_json: dict[str, Any] | None = None
+    locale: str | None = None
+    intent_score: int = 0
+    stage: str = "discovered"
+    cluster_id: uuid.UUID | None = None
+    first_seen_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    last_activity_at: datetime | None = None
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    deleted_at: datetime | None = None
+
+
+@dataclass
+class FakeLeadEventRow:
+    lead_id: uuid.UUID
+    type: str
+    payload_json: dict[str, Any] | None
+    occurred_at: datetime
+
+
+@dataclass
+class FakeLeadScoreRow:
+    lead_id: uuid.UUID
+    model_version: str
+    score: int
+    features_json: dict[str, Any] | None
+    scored_at: datetime
+
+
+@dataclass
+class FakeRawLeadDocumentRow:
+    id: uuid.UUID
+    source_id: uuid.UUID
+    content_hash: str
+    storage_key: str
+    status: str
+
+
+class FakeLeadCollector:
+    """LeadCollector returning canned docs per source id.
+
+    An Exception value raises instead of returning; `not_configured` raises
+    CollectorNotConfiguredError (the 'skipped: no credentials' path)."""
+
+    def __init__(self) -> None:
+        self.docs: dict[uuid.UUID, list[CollectedDoc] | Exception] = {}
+        self.not_configured: set[uuid.UUID] = set()
+        self.calls: list[uuid.UUID] = []
+
+    def set(self, source_id: uuid.UUID, docs: list[CollectedDoc] | Exception) -> None:
+        self.docs[source_id] = docs
+
+    async def collect(self, source: Any) -> list[CollectedDoc]:
+        self.calls.append(source.id)
+        if source.id in self.not_configured:
+            raise CollectorNotConfiguredError(source.type)
+        response = self.docs.get(source.id)
+        if response is None:
+            return []
+        if isinstance(response, Exception):
+            raise response
+        return list(response)
+
+
+class FakeLeadStore:
+    """Dict-backed store satisfying the LeadSourceRepository,
+    LeadDiscoveryRepository and LeadMaintenanceRepository protocols."""
+
+    def __init__(self) -> None:
+        self.sources: dict[uuid.UUID, FakeLeadSourceRow] = {}
+        self.raw_documents: dict[uuid.UUID, FakeRawLeadDocumentRow] = {}
+        self.leads: dict[uuid.UUID, FakeLeadRow] = {}
+        self.lead_events: list[FakeLeadEventRow] = []
+        self.lead_scores: list[FakeLeadScoreRow] = []
+
+    # ----------------------------------------------------------- registry
+
+    def add_source(
+        self,
+        name: str,
+        type: str,  # noqa: A002 - mirrors the protocol
+        *,
+        url: str | None = None,
+        config: dict[str, Any] | None = None,
+        enabled: bool = True,
+        competitor_id: uuid.UUID | None = None,
+    ) -> FakeLeadSourceRow:
+        row = FakeLeadSourceRow(
+            id=uuid.uuid4(),
+            name=name,
+            type=type,
+            url=url,
+            config_json=config,
+            enabled=enabled,
+            competitor_id=competitor_id,
+        )
+        self.sources[row.id] = row
+        return row
+
+    async def list_lead_sources(self) -> list[FakeLeadSourceRow]:
+        return [row for row in self.sources.values() if row.competitor_id is None]
+
+    async def get_source(self, source_id: uuid.UUID) -> FakeLeadSourceRow | None:
+        return self.sources.get(source_id)
+
+    async def create_lead_source(
+        self,
+        *,
+        name: str,
+        type: str,  # noqa: A002 - mirrors the protocol
+        url: str | None,
+        config: dict[str, Any] | None,
+        rate_limit_per_hr: int,
+    ) -> FakeLeadSourceRow:
+        row = FakeLeadSourceRow(
+            id=uuid.uuid4(),
+            name=name,
+            type=type,
+            url=url,
+            config_json=config,
+            rate_limit_per_hr=rate_limit_per_hr,
+        )
+        self.sources[row.id] = row
+        return row
+
+    async def update_source(
+        self, source_id: uuid.UUID, changes: dict[str, Any]
+    ) -> FakeLeadSourceRow:
+        row = self.sources[source_id]
+        for key, value in changes.items():
+            setattr(row, key, value)
+        return row
+
+    async def delete_source(self, source_id: uuid.UUID) -> None:
+        self.sources.pop(source_id, None)
+
+    # ----------------------------------------------------------- pipeline
+
+    async def enabled_lead_sources(self) -> list[FakeLeadSourceRow]:
+        return [row for row in self.sources.values() if row.competitor_id is None and row.enabled]
+
+    async def set_source_result(
+        self, source_id: uuid.UUID, status: str, checked_at: datetime | None
+    ) -> None:
+        source = self.sources.get(source_id)
+        if source is None:
+            return
+        source.last_status = status
+        if checked_at is not None:
+            source.last_checked_at = checked_at
+
+    async def raw_document_exists(self, source_id: uuid.UUID, content_hash: str) -> bool:
+        return any(
+            raw.source_id == source_id and raw.content_hash == content_hash
+            for raw in self.raw_documents.values()
+        )
+
+    async def create_raw_document(
+        self, *, source_id: uuid.UUID, content_hash: str, storage_key: str, status: str
+    ) -> FakeRawLeadDocumentRow:
+        row = FakeRawLeadDocumentRow(
+            id=uuid.uuid4(),
+            source_id=source_id,
+            content_hash=content_hash,
+            storage_key=storage_key,
+            status=status,
+        )
+        self.raw_documents[row.id] = row
+        return row
+
+    async def set_raw_document_status(self, raw_id: uuid.UUID, status: str) -> None:
+        raw = self.raw_documents.get(raw_id)
+        if raw is not None:
+            raw.status = status
+
+    async def find_lead_by_dedup(self, dedup_hash: str) -> FakeLeadRow | None:
+        for lead in self.leads.values():
+            if lead.dedup_hash == dedup_hash and lead.deleted_at is None:
+                return lead
+        return None
+
+    async def get_lead(self, lead_id: uuid.UUID) -> FakeLeadRow | None:
+        lead = self.leads.get(lead_id)
+        return lead if lead is not None and lead.deleted_at is None else None
+
+    async def create_lead(
+        self,
+        *,
+        source_id: uuid.UUID,
+        kind: str,
+        name: str,
+        contact_json: dict[str, Any] | None,
+        locale: str | None,
+        intent_score: int,
+        dedup_hash: str,
+        first_seen_at: datetime,
+    ) -> FakeLeadRow:
+        row = FakeLeadRow(
+            id=uuid.uuid4(),
+            source_id=source_id,
+            kind=kind,
+            name=name,
+            contact_json=contact_json,
+            locale=locale,
+            intent_score=intent_score,
+            dedup_hash=dedup_hash,
+            first_seen_at=first_seen_at,
+            last_activity_at=first_seen_at,
+        )
+        self.leads[row.id] = row
+        return row
+
+    async def touch_lead(self, lead_id: uuid.UUID, activity_at: datetime) -> None:
+        lead = self.leads.get(lead_id)
+        if lead is not None:
+            lead.last_activity_at = activity_at
+
+    async def add_lead_event(
+        self,
+        lead_id: uuid.UUID,
+        event_type: str,
+        payload: dict[str, Any] | None,
+        occurred_at: datetime,
+    ) -> None:
+        self.lead_events.append(
+            FakeLeadEventRow(
+                lead_id=lead_id,
+                type=event_type,
+                payload_json=payload,
+                occurred_at=occurred_at,
+            )
+        )
+
+    async def add_lead_score(
+        self,
+        lead_id: uuid.UUID,
+        *,
+        model_version: str,
+        score: int,
+        features: dict[str, Any] | None,
+        scored_at: datetime,
+    ) -> None:
+        self.lead_scores.append(
+            FakeLeadScoreRow(
+                lead_id=lead_id,
+                model_version=model_version,
+                score=score,
+                features_json=features,
+                scored_at=scored_at,
+            )
+        )
+
+    # -------------------------------------------------------- maintenance
+
+    async def leads_for_clustering(self) -> list[tuple[uuid.UUID, str]]:
+        rows: list[tuple[uuid.UUID, str]] = []
+        for lead in self.leads.values():
+            if lead.deleted_at is not None:
+                continue
+            excerpt = ""
+            for event in reversed(self.lead_events):  # newest first
+                if event.lead_id == lead.id and event.type == "discovered":
+                    payload = event.payload_json or {}
+                    value = payload.get("excerpt")
+                    if isinstance(value, str):
+                        excerpt = value
+                    break
+            rows.append((lead.id, f"{lead.name} {excerpt}".strip()))
+        return rows
+
+    async def set_cluster_ids(self, mapping: dict[uuid.UUID, uuid.UUID]) -> None:
+        for lead_id, cluster_id in mapping.items():
+            if lead_id in self.leads:
+                self.leads[lead_id].cluster_id = cluster_id
+
+    async def stale_leads(self, cutoff: datetime, *, exclude_name: str) -> list[FakeLeadRow]:
+        rows = []
+        for lead in self.leads.values():
+            if lead.deleted_at is not None or lead.stage == "won":
+                continue
+            activity = lead.last_activity_at or lead.first_seen_at
+            if activity >= cutoff:
+                continue
+            if lead.contact_json is None and lead.name == exclude_name:
+                continue  # already anonymized
+            rows.append(lead)
+        return rows
+
+    async def anonymize_lead(self, lead_id: uuid.UUID, name: str) -> None:
+        lead = self.leads[lead_id]
+        lead.name = name
+        lead.contact_json = None
+
+    # -------------------------------------------------------------- assertions
+
+    def events_for(self, lead_id: uuid.UUID, event_type: str) -> list[FakeLeadEventRow]:
+        return [
+            event
+            for event in self.lead_events
+            if event.lead_id == lead_id and event.type == event_type
+        ]
+
+
 @dataclass
 class FakeCompetitorRow:
     id: uuid.UUID

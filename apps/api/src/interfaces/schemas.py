@@ -210,6 +210,8 @@ class BankTransactionOut(BaseModel):
 
 # ------------------------------------------------------------------ leads
 
+LeadKind = Literal["guest", "longstay", "b2b", "supplier"]
+
 
 class LeadOut(ORMModel):
     # contact_json is intentionally omitted: it is PII (PDPA-minimized surface).
@@ -231,6 +233,38 @@ class LeadListOut(BaseModel):
 
 class StageChangeIn(BaseModel):
     stage: LeadStage
+
+
+class LeadContactOut(BaseModel):
+    """Decrypted PDPA-minimal contact (§8.5): platform + public handle only."""
+
+    platform: str | None = None
+    handle: str | None = None
+    url: str | None = None
+
+
+class LeadEventOut(BaseModel):
+    type: str
+    payload: dict[str, Any] | None
+    occurred_at: datetime
+
+
+class LeadScoreOut(BaseModel):
+    # 'model_version' clashes with pydantic's protected 'model_' namespace.
+    model_config = ConfigDict(protected_namespaces=())
+
+    value: int
+    model_version: str
+    features: dict[str, Any] | None
+
+
+class LeadDetailOut(LeadOut):
+    """GET /v1/leads/{id}: decrypted contact, event history, latest score."""
+
+    contact: LeadContactOut | None
+    events: list[LeadEventOut]
+    score: LeadScoreOut | None
+    suggestion: str | None
 
 
 # ------------------------------------------------------------------ competitors
@@ -319,6 +353,55 @@ class CompetitorWithSourcesOut(CompetitorOut):
 
 class SweepAccepted(BaseModel):
     """POST /v1/competitors/{id}:check response (202)."""
+
+    dispatched: bool
+    detail: str
+
+
+# ------------------------------------------------------------------ lead sources
+
+LeadSourceType = Literal["rss", "reddit"]
+
+
+class LeadSourceCreateIn(BaseModel):
+    """POST /v1/sources body. rss requires url (blocklist-checked, §8.4);
+    reddit requires config.subreddit (normalized: 'r/' stripped, lowercase)."""
+
+    name: str = Field(min_length=1, max_length=200)
+    type: LeadSourceType
+    url: str | None = Field(default=None, max_length=2_000)
+    config: dict[str, Any] | None = None
+    rate_limit_per_hr: int = Field(default=12, ge=1, le=120)
+
+
+class LeadSourceUpdateIn(BaseModel):
+    """PATCH body: only fields explicitly provided are applied."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    enabled: bool | None = None
+    rate_limit_per_hr: int | None = Field(default=None, ge=1, le=120)
+    config: dict[str, Any] | None = None
+    url: str | None = Field(default=None, max_length=2_000)
+
+
+class LeadSourceOut(ORMModel):
+    id: uuid.UUID
+    name: str
+    type: str
+    url: str | None
+    config: dict[str, Any] | None = Field(
+        default=None, validation_alias=AliasChoices("config", "config_json")
+    )
+    tos_policy: str
+    rate_limit_per_hr: int
+    enabled: bool
+    last_checked_at: datetime | None
+    last_status: str | None
+    created_at: datetime
+
+
+class LeadCollectAccepted(BaseModel):
+    """POST /v1/sources/{id}:collect response (202)."""
 
     dispatched: bool
     detail: str

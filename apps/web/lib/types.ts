@@ -289,9 +289,104 @@ export interface Lead {
 
 export interface LeadListParams {
   stage?: LeadStage;
+  kind?: LeadKind;
   min_score?: number;
   q?: string;
   cursor?: string;
+  limit?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Lead discovery CRM (M5) — detail, events, scoring, sources
+// ---------------------------------------------------------------------------
+
+/**
+ * Owner-only public contact info (PDPA: minimal, auto-anonymized after 18
+ * months of inactivity). null when no contact was captured or already erased.
+ */
+export interface LeadContact {
+  /** e.g. "reddit" | "rss". */
+  platform: string;
+  handle: string;
+  url: string;
+}
+
+/** Timeline entry inside GET /v1/leads/{id} — type is a free string. */
+export interface LeadEvent {
+  type: string;
+  payload: Record<string, unknown>;
+  occurred_at: string;
+}
+
+/** Latest intent-score snapshot with the feature breakdown that produced it. */
+export interface LeadScoreInfo {
+  value: number;
+  model_version: string;
+  features: Record<string, unknown>;
+}
+
+/** GET /v1/leads/{id} — Lead enriched with contact, timeline and scoring. */
+export interface LeadDetail extends Lead {
+  contact: LeadContact | null;
+  events: LeadEvent[];
+  score: LeadScoreInfo | null;
+  /** LLM follow-up suggestion (Thai), null until the classifier has run. */
+  suggestion: string | null;
+}
+
+/**
+ * Source types accepted by the lead collector. Reddit goes through the
+ * official API only; RSS is fetched directly (ToS compliance gate applies).
+ */
+export type LeadSourceType = "rss" | "reddit";
+
+/** Collector config — subreddit/query for reddit sources. */
+export interface LeadSourceConfig {
+  subreddit?: string;
+  query?: string;
+}
+
+/** GET /v1/sources list item · POST/PATCH response body. */
+export interface LeadSource {
+  id: string;
+  name: string;
+  type: LeadSourceType;
+  url: string | null;
+  config: LeadSourceConfig | null;
+  /** ToS policy verdict recorded by the compliance gate. */
+  tos_policy: string;
+  rate_limit_per_hr: number;
+  enabled: boolean;
+  last_checked_at: string | null;
+  /** Collector outcome — free string, labelled via sourceStatusLabel(). */
+  last_status: string | null;
+  created_at: string;
+}
+
+/**
+ * POST /v1/sources — responds 422 problem+json (Thai detail) when the URL is
+ * a ToS-blocked domain.
+ */
+export interface LeadSourceCreate {
+  name: string;
+  type: LeadSourceType;
+  url?: string;
+  config?: LeadSourceConfig;
+  rate_limit_per_hr?: number;
+}
+
+/** PATCH /v1/sources/{id} — all fields optional. */
+export interface LeadSourcePatch {
+  enabled?: boolean;
+  name?: string;
+  url?: string;
+  config?: LeadSourceConfig;
+  rate_limit_per_hr?: number;
+}
+
+/** POST /v1/sources/{id}:collect → 202 accepted. */
+export interface CollectResponse {
+  detail: string;
 }
 
 // ---------------------------------------------------------------------------

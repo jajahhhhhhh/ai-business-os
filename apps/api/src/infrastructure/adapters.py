@@ -23,7 +23,8 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from src.application.errors import ComplianceRefusedError
+from src.application.errors import CollectorNotConfiguredError, ComplianceRefusedError
+from src.application.lead_discovery import CollectedDoc
 from src.application.ports import (
     ChangeAnalyst,
     Embedder,
@@ -139,6 +140,87 @@ class CompetitorAdapters:
             aclose = getattr(gateway, "aclose", None)
             if aclose is not None:
                 await aclose()
+
+
+# --------------------------------------------------------- M5: lead discovery
+
+
+class ComplianceLeadCollector:
+    """LeadCollector port building a per-source collector (rss/reddit).
+
+    Same lazy-import availability gating as ComplianceGateFetcher: the
+    collectors package is only imported inside collect(), so the API tree
+    stays importable without it and lead sweeps then record per-source
+    'error: ...' statuses. Reddit uses the OFFICIAL API only (§8.4): missing
+    credentials raise CollectorNotConfiguredError, which the pipeline records
+    as 'skipped: no credentials' — never an HTML-scrape fallback.
+    """
+
+    def __init__(self, *, reddit_client_id: str = "", reddit_client_secret: str = "") -> None:
+        self._reddit_client_id = reddit_client_id
+        self._reddit_client_secret = reddit_client_secret
+        self._gate: Any | None = None
+
+    async def collect(self, source: Any) -> list[CollectedDoc]:
+        try:
+            from collectors.compliance import (
+                ComplianceGate,
+                ComplianceViolation,
+                SourcePolicy,
+                TosPolicy,
+            )
+            from collectors.reddit import RedditCollector
+            from collectors.rss import RssCollector
+        except ImportError as exc:
+            raise RuntimeError(
+                "collectors package not installed; lead collection needs the "
+                "services/collectors library (installed in the API container)"
+            ) from exc
+        if self._gate is None:
+            self._gate = ComplianceGate()
+        policy = SourcePolicy(
+            name=str(source.id),
+            tos_policy=TosPolicy(source.tos_policy),
+            rate_limit_per_hr=source.rate_limit_per_hr,
+            enabled=source.enabled,
+        )
+        if source.type == "reddit":
+            config = source.config_json or {}
+            collector: Any = RedditCollector(
+                self._gate,
+                policy,
+                str(config.get("subreddit") or ""),
+                config.get("query") or None,
+                client_id=self._reddit_client_id,
+                client_secret=self._reddit_client_secret,
+            )
+            if not collector.is_configured:
+                raise CollectorNotConfiguredError("reddit")
+        elif source.type == "rss":
+            if not source.url:
+                raise RuntimeError("rss lead source has no url")
+            collector = RssCollector(self._gate, policy, source.url)
+        else:
+            raise RuntimeError(f"unsupported lead source type {source.type!r}")
+        try:
+            raw_docs = await collector.fetch()
+        except ComplianceViolation as exc:
+            raise ComplianceRefusedError(exc.reason, str(exc)) from exc
+        return [
+            CollectedDoc(url=doc.url, content=doc.content, fetched_at=doc.fetched_at)
+            for doc in raw_docs
+        ]
+
+    async def aclose(self) -> None:
+        if self._gate is not None:
+            await self._gate.aclose()
+
+
+def build_lead_collector(settings: Settings) -> ComplianceLeadCollector:
+    return ComplianceLeadCollector(
+        reddit_client_id=settings.reddit_client_id,
+        reddit_client_secret=settings.reddit_client_secret,
+    )
 
 
 def build_competitor_adapters(

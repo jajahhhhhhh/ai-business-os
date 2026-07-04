@@ -183,8 +183,13 @@ class Source(TimestampMixin, Base):
         sa.ForeignKey("competitors.id", ondelete="CASCADE")
     )
     last_checked_at: Mapped[datetime | None]
-    # baseline|unchanged|changed|'blocked: <reason>'|'error: <detail>'
+    # Competitor sources (M3): baseline|unchanged|changed|'blocked: ...'|
+    # 'error: ...'. Lead sources (M5): 'ok: N docs, M leads'|'blocked: ...'|
+    # 'error: ...'|'skipped: no credentials'.
     last_status: Mapped[str | None]
+    # M5 lead sources: per-type collector configuration, e.g. reddit
+    # {"subreddit": "kohsamui", "query": "villa"|null}. NULL for rss/website.
+    config_json: Mapped[dict[str, Any] | None]
 
 
 class RawDocument(TimestampMixin, Base):

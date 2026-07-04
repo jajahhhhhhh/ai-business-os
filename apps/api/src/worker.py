@@ -17,6 +17,14 @@ Production tasks:
 - run_agent_task      — generic M4 agent runner: (agent_name, task_kind).
                         Beat: memory capture-signals 07:00 daily, planner
                         weekly-plan Mon 08:30, qa evaluate Sun 04:30.
+- collect_lead_source — M5: one lead source through the customer-discovery
+                        agent ('discover'), dispatched by POST
+                        /v1/sources/{id}:collect
+- collect_all_lead_sources — M5: every enabled lead source every 4 h (§13)
+                        via the customer-discovery agent ('discover-all')
+- cluster_leads       — M5: Sun 05:30 greedy lead clustering (skips cleanly
+                        without the ml extra)
+- anonymize_stale_leads — M5: Sun 05:45 PDPA retention pass (§8.5, 18 months)
 
 Tasks are sync Celery functions wrapping the async use cases with asyncio.run;
 each run builds and disposes its own engine so worker processes never leak
@@ -115,6 +123,21 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(minute=30, hour=4, day_of_week="sun"),
         "args": ("qa", "evaluate"),
     },
+    # M5: lead-source collector sweep every 4 h (§13).
+    "collect-all-lead-sources-4h": {
+        "task": "src.worker.collect_all_lead_sources",
+        "schedule": crontab(minute=0, hour="*/4"),
+    },
+    # M5: weekly lead clustering Sun 05:30 Asia/Bangkok.
+    "cluster-leads-sun-0530": {
+        "task": "src.worker.cluster_leads",
+        "schedule": crontab(minute=30, hour=5, day_of_week="sun"),
+    },
+    # M5: PDPA retention pass Sun 05:45 Asia/Bangkok (§8.5, 18 months).
+    "anonymize-stale-leads-sun-0545": {
+        "task": "src.worker.anonymize_stale_leads",
+        "schedule": crontab(minute=45, hour=5, day_of_week="sun"),
+    },
 }
 
 WORKER_ACTOR = "worker"
@@ -162,7 +185,9 @@ async def _sync_bank_alerts() -> dict[str, int]:
 # ---------------------------------------------------------------- M4: agents
 
 
-async def _run_agent(agent_name: str, task_kind: str) -> dict[str, object]:
+async def _run_agent(
+    agent_name: str, task_kind: str, payload: dict[str, object] | None = None
+) -> dict[str, object]:
     """Run one agent task with per-run engine/adapters/runtime; NEVER raises
     (run_agent itself absorbs everything; this adds setup/teardown safety).
 
@@ -188,6 +213,7 @@ async def _run_agent(agent_name: str, task_kind: str) -> dict[str, object]:
             kb_adapters=build_kb_adapters(settings),
             competitor_adapters=competitor_adapters,
             actor=WORKER_ACTOR,
+            payload=payload,
         )
     except Exception as exc:  # noqa: BLE001 - never raise out of a worker task
         logger.exception("run_agent_setup_failed", agent=agent_name, task_kind=task_kind)
@@ -419,3 +445,79 @@ def run_agent_task(self, agent_name: str, task_kind: str) -> dict[str, object]: 
     except Exception:  # noqa: BLE001 - defensive: even setup failures stay in-task
         logger.exception("run_agent_task_error", agent=agent_name, task_kind=task_kind)
         return {"agent": agent_name, "task_kind": task_kind, "status": "failed"}
+
+
+# ---------------------------------------------------------- M5: lead discovery
+
+
+async def _run_lead_maintenance(kind: str) -> dict[str, object]:
+    """Run clustering or anonymization with a per-run engine; NEVER raises."""
+    settings = get_settings()
+    engine = build_engine(settings.database_url)
+    try:
+        from src.application.lead_maintenance import LeadMaintenanceUseCases
+        from src.infrastructure.repositories import LeadMaintenanceSqlRepository
+
+        maker = build_sessionmaker(engine)
+        kb_adapters = build_kb_adapters(settings)
+        async with maker() as session:
+            use_cases = LeadMaintenanceUseCases(
+                LeadMaintenanceSqlRepository(session),
+                SqlAuditWriter(session),
+                embedder=kb_adapters.embedder,
+            )
+            if kind == "cluster":
+                result = await use_cases.cluster_leads(WORKER_ACTOR)
+            else:
+                result = await use_cases.anonymize_stale_leads(WORKER_ACTOR)
+            await session.commit()
+        logger.info("lead_maintenance_done", kind=kind, **result)
+        return dict(result)
+    except Exception as exc:  # noqa: BLE001 - maintenance must never crash the worker
+        logger.exception("lead_maintenance_failed", kind=kind)
+        return {"status": "failed", "error": str(exc)[:ERROR_MAX_CHARS]}
+    finally:
+        await engine.dispose()
+
+
+@celery_app.task(name="src.worker.collect_lead_source", bind=True)
+def collect_lead_source(self, source_id: str) -> dict[str, object]:  # noqa: ANN001
+    """M5: one lead source through the customer-discovery agent ('discover').
+
+    No Celery retry: per-source failures land in sources.last_status and
+    retry/escalate/park is the Runner's job."""
+    try:
+        return asyncio.run(_run_agent("customer-discovery", "discover", {"source_id": source_id}))
+    except Exception:  # noqa: BLE001 - defensive: even setup failures stay in-task
+        logger.exception("collect_lead_source_task_error", source_id=source_id)
+        return {"status": "failed"}
+
+
+@celery_app.task(name="src.worker.collect_all_lead_sources", bind=True)
+def collect_all_lead_sources(self) -> dict[str, object]:  # noqa: ANN001 - celery bind
+    """M5: 4-hourly lead-source sweep via customer-discovery ('discover-all')."""
+    try:
+        return asyncio.run(_run_agent("customer-discovery", "discover-all"))
+    except Exception:  # noqa: BLE001 - defensive: even setup failures stay in-task
+        logger.exception("collect_all_lead_sources_task_error")
+        return {"status": "failed"}
+
+
+@celery_app.task(name="src.worker.cluster_leads", bind=True)
+def cluster_leads(self) -> dict[str, object]:  # noqa: ANN001 - celery bind
+    """M5: Sun 05:30 greedy lead clustering (_run_lead_maintenance never raises)."""
+    try:
+        return asyncio.run(_run_lead_maintenance("cluster"))
+    except Exception:  # noqa: BLE001 - defensive: even setup failures stay in-task
+        logger.exception("cluster_leads_task_error")
+        return {"status": "failed"}
+
+
+@celery_app.task(name="src.worker.anonymize_stale_leads", bind=True)
+def anonymize_stale_leads(self) -> dict[str, object]:  # noqa: ANN001 - celery bind
+    """M5: Sun 05:45 PDPA retention pass (§8.5)."""
+    try:
+        return asyncio.run(_run_lead_maintenance("anonymize"))
+    except Exception:  # noqa: BLE001 - defensive: even setup failures stay in-task
+        logger.exception("anonymize_stale_leads_task_error")
+        return {"status": "failed"}

@@ -29,7 +29,8 @@ RUN pip install \
     "python-multipart>=0.0.12" \
     "boto3>=1.35" \
     "qdrant-client>=1.12" \
-    "jinja2>=3.1"
+    "jinja2>=3.1" \
+    "cryptography>=43"
 
 # M2 document parsing (mirrors pyproject [project.optional-dependencies].parsing).
 RUN pip install \

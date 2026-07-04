@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 from src.config import get_settings
 from src.infrastructure.db import build_engine, build_sessionmaker
-from src.infrastructure.models import Contractor, Site, User
+from src.infrastructure.models import Contractor, Site, Source, User
 
 OWNER_EMAIL = "ch_company@howtoniksen.com"
 SITES = (
@@ -20,6 +20,15 @@ SITES = (
     ("Chaweng", "Chaweng, Koh Samui"),
 )
 CONTRACTOR = "MR.HOME"
+
+# Default M5 lead sources (§8.4: Reddit via official API only). Inert until
+# REDDIT_CLIENT_ID/SECRET are configured — the collector then reports
+# 'skipped: no credentials' instead of scraping.
+LEAD_SOURCES = (
+    ("r/kohsamui", "kohsamui", None),
+    ("r/thailand samui", "thailand", "samui villa OR koh samui accommodation"),
+    ("r/digitalnomad samui", "digitalnomad", "samui"),
+)
 
 
 async def seed() -> None:
@@ -55,6 +64,26 @@ async def seed() -> None:
                 print(f"created contractor {CONTRACTOR}")
             else:
                 print(f"contractor {CONTRACTOR} already present")
+
+            for name, subreddit, query in LEAD_SOURCES:
+                source = (
+                    await session.execute(sa.select(Source).where(Source.name == name))
+                ).scalar_one_or_none()
+                if source is None:
+                    session.add(
+                        Source(
+                            name=name,
+                            type="reddit",
+                            url=f"https://www.reddit.com/r/{subreddit}/",
+                            config_json={"subreddit": subreddit, "query": query},
+                            tos_policy="allowed",
+                            rate_limit_per_hr=12,
+                            enabled=True,
+                        )
+                    )
+                    print(f"created lead source {name}")
+                else:
+                    print(f"lead source {name} already present")
 
             await session.commit()
     finally:

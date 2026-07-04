@@ -18,6 +18,7 @@ import type {
   BankTransaction,
   BankTransactionListParams,
   CheckResponse,
+  CollectResponse,
   Competitor,
   CompetitorChange,
   CompetitorChangeListParams,
@@ -40,7 +41,12 @@ import type {
   KbSearchParams,
   KbSearchResponse,
   Lead,
+  LeadDetail,
   LeadListParams,
+  LeadSource,
+  LeadSourceCreate,
+  LeadSourcePatch,
+  LeadStage,
   Milestone,
   MilestoneCreate,
   MilestonePatch,
@@ -240,10 +246,61 @@ export function getSiteSummary(siteId: string): Promise<SiteSummary> {
 export function listLeads(params: LeadListParams = {}): Promise<Paginated<Lead>> {
   return get<Paginated<Lead>>("/leads", {
     stage: params.stage,
+    kind: params.kind,
     min_score: params.min_score,
     q: params.q,
     cursor: params.cursor,
+    limit: params.limit,
   });
+}
+
+// ---------------------------------------------------------------------------
+// Lead discovery CRM (M5) — reads for server components
+// ---------------------------------------------------------------------------
+
+/** GET /v1/leads/{id} — lead enriched with contact, timeline and scoring. */
+export function getLead(id: string): Promise<LeadDetail> {
+  return get<LeadDetail>(`/leads/${encodeURIComponent(id)}`);
+}
+
+/** GET /v1/sources — lead discovery sources (Reddit / RSS). */
+export function listSources(): Promise<LeadSource[]> {
+  return get<LeadSource[]>("/sources");
+}
+
+// ---------------------------------------------------------------------------
+// Lead discovery CRM (M5) — mutations for `use client` components.
+// All throw ApiError with a display-ready problem+json detail.
+// ---------------------------------------------------------------------------
+
+/**
+ * POST /v1/leads/{id}/stage — advance the pipeline stage. An invalid
+ * transition gets a 409 problem+json (Thai detail), shown inline on the card.
+ */
+export function moveLead(id: string, stage: LeadStage): Promise<Lead> {
+  return mutate<Lead>("POST", `/leads/${encodeURIComponent(id)}/stage`, { stage });
+}
+
+/**
+ * POST /v1/sources → 201. A 422 ApiError carries the ToS compliance-gate
+ * detail (Thai) for blocked domains — rendered as a policy panel in the form.
+ */
+export function createSource(payload: LeadSourceCreate): Promise<LeadSource> {
+  return mutate<LeadSource>("POST", "/sources", payload);
+}
+
+export function patchSource(id: string, payload: LeadSourcePatch): Promise<LeadSource> {
+  return mutate<LeadSource>("PATCH", `/sources/${encodeURIComponent(id)}`, payload);
+}
+
+/** DELETE /v1/sources/{id} → 204. */
+export function deleteSource(id: string): Promise<void> {
+  return remove(`/sources/${encodeURIComponent(id)}`);
+}
+
+/** POST /v1/sources/{id}:collect → 202 { detail }. */
+export function collectSource(id: string): Promise<CollectResponse> {
+  return mutate<CollectResponse>("POST", `/sources/${encodeURIComponent(id)}:collect`);
 }
 
 /** GET /v1/competitors — each competitor carries its nested sources. */

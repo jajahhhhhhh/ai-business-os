@@ -14,6 +14,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from src.application.errors import (
     ComplianceRefusedError,
+    LeadSourceInvalidError,
     NotFoundError,
     UnrecognizedBankAlertError,
 )
@@ -104,6 +105,10 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(ComplianceRefusedError)
     async def _compliance_refused(request: Request, exc: ComplianceRefusedError) -> JSONResponse:
+        return problem_response(request, status=422, title="Unprocessable Entity", detail=str(exc))
+
+    @app.exception_handler(LeadSourceInvalidError)
+    async def _lead_source_invalid(request: Request, exc: LeadSourceInvalidError) -> JSONResponse:
         return problem_response(request, status=422, title="Unprocessable Entity", detail=str(exc))
 
     @app.exception_handler(UnrecognizedBankAlertError)

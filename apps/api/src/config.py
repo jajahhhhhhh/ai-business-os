@@ -18,6 +18,9 @@ def _default_agent_budgets() -> dict[str, Decimal]:
         "memory": Decimal("0.20"),
         "qa": Decimal("0.50"),
         "change-analyst": Decimal("2.00"),
+        # M5: lead discovery classification runs on the LOW tier in ≤10-item
+        # batches; $0.50/day covers hundreds of classified posts.
+        "customer-discovery": Decimal("0.50"),
     }
 
 
@@ -72,6 +75,12 @@ class Settings(BaseSettings):
     # /app/prompts in the container, walk-up to packages/prompts in dev.
     prompts_dir: str = ""
 
+    # M5 lead discovery: PII encryption key for leads.contact_json (§8.5).
+    # A Fernet key (urlsafe base64, 32 bytes) via PII_ENCRYPTION_KEY; when
+    # empty a key is DERIVED from api_secret_key (sha256 -> urlsafe b64) with
+    # a startup warning — see src/infrastructure/pii.py.
+    pii_encryption_key: str = ""
+
     # Secrets: default empty; access through `require()` when actually needed.
     meili_master_key: str = ""
     s3_access_key: str = ""
@@ -84,6 +93,11 @@ class Settings(BaseSettings):
     gmail_client_id: str = ""
     gmail_client_secret: str = ""
     gmail_refresh_token: str = ""
+    # M5: Reddit official-API app credentials (client_credentials OAuth).
+    # Empty -> reddit sources record 'skipped: no credentials' (§8.4: never
+    # scrape reddit.com HTML as a fallback).
+    reddit_client_id: str = ""
+    reddit_client_secret: str = ""
 
     def require(self, name: str) -> str:
         """Return the named setting, raising a clear error if it is empty.
