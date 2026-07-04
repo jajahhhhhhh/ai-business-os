@@ -1,0 +1,2 @@
+{"input": {"competitor_name": "Villa Aroon", "diff": "+ ราคาพิเศษ ลด 20% เหลือ 4,500 บาท/คืน สำหรับเดือนกันยายน"}, "expected_qualities": ["json_only", "category_in_vocab", "severity_in_vocab", "summary_thai", "summary_max_160"]}
+{"input": {"competitor_name": "Samui Breeze", "diff": "+ เปิดจองวิลล่าหลังใหม่ 3 ห้องนอน พร้อมสระส่วนตัว"}, "expected_qualities": ["json_only", "category_in_vocab", "severity_in_vocab", "summary_thai", "summary_max_160"]}

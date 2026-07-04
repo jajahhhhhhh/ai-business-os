@@ -5,7 +5,10 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
+
+if TYPE_CHECKING:  # imported lazily at runtime (orchestrator dependency)
+    from src.infrastructure.agent_runtime import AgentRuntime
 
 import sqlalchemy as sa
 from fastapi import Depends, Request
@@ -53,6 +56,22 @@ def get_competitor_adapters(request: Request) -> CompetitorAdapters:
     """The M3 competitor-intel gateway set built by create_app (fakes in tests)."""
     adapters: CompetitorAdapters = request.app.state.competitor_adapters
     return adapters
+
+
+def get_agent_runtime(request: Request) -> AgentRuntime:
+    """The M4 agent runtime (LLM/escalator/LINE seam).
+
+    Injected via create_app(agent_runtime=...) in tests; built lazily on
+    first use in production so the orchestrator package stays off the
+    create_app import path.
+    """
+    runtime = getattr(request.app.state, "agent_runtime", None)
+    if runtime is None:
+        from src.infrastructure.agent_runtime import build_agent_runtime
+
+        runtime = build_agent_runtime(request.app.state.settings, request.app.state.sessionmaker)
+        request.app.state.agent_runtime = runtime
+    return runtime
 
 
 SettingsDep = Annotated[Settings, Depends(get_app_settings)]

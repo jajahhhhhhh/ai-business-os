@@ -417,6 +417,40 @@ class AgentRunOut(ORMModel):
     error: str | None
 
 
+class AgentCostOut(BaseModel):
+    """GET /v1/agents/costs item: one agent x Bangkok-local day.
+
+    Mirrors apps/web/lib/types.ts AgentCost exactly.
+    """
+
+    agent: str
+    day: str  # 'YYYY-MM-DD', Asia/Bangkok day boundaries
+    cost_usd: USD
+    tokens_in: int
+    tokens_out: int
+    runs: int
+    budget_usd: USD | None  # settings.agent_budgets cap; null for unknown agents
+
+
+class AgentEvalOut(BaseModel):
+    """GET /v1/agents/evals item (agent joined in from agent_runs)."""
+
+    id: uuid.UUID
+    run_id: uuid.UUID
+    agent: str
+    rubric: str
+    score: int  # 0-100
+    notes: str | None
+    created_at: datetime
+
+
+class AgentTriggerAccepted(BaseModel):
+    """POST /v1/agents/{name}:trigger response (202)."""
+
+    agent: str
+    detail: str
+
+
 class ReportOut(ORMModel):
     id: uuid.UUID
     kind: str

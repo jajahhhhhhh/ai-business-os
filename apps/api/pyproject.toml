@@ -18,7 +18,18 @@ dependencies = [
     "python-multipart>=0.0.12",
     "boto3>=1.35",
     "qdrant-client>=1.12",
+    # M4: prompt templates (packages/prompts *.j2) render via Jinja2; a core
+    # dep (not optional) because the ChangeAnalyst prompt path uses it too.
+    "jinja2>=3.1",
 ]
+
+# M4 NOTE: the agent runtime (src/infrastructure/agent_runtime.py and
+# src/application/agents/) additionally requires the in-repo orchestrator
+# package (services/orchestrator). It is installed in the API image by the
+# integrator's Dockerfile; for local dev/tests use
+#   PYTHONPATH=../../services/orchestrator/src
+# Modules that need it import it lazily or are test-skipped when absent, so
+# the API itself boots without it (agent tasks then report failed status).
 
 # Optional extras (M2). `parsing` is optional rather than core because
 # pdfplumber/pdf2image drag in heavy binary deps (pypdfium2, poppler) that the

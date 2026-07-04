@@ -32,6 +32,8 @@ const RUN_DOT: Record<AgentRunStatus, string> = {
   running: "bg-blue-500",
   succeeded: "bg-emerald-500",
   failed: "bg-rose-500",
+  parked: "bg-amber-400",
+  over_budget: "bg-rose-500",
 };
 
 const RUN_BADGE: Record<AgentRunStatus, BadgeVariant> = {
@@ -39,7 +41,16 @@ const RUN_BADGE: Record<AgentRunStatus, BadgeVariant> = {
   running: "blue",
   succeeded: "green",
   failed: "red",
+  parked: "amber",
+  over_budget: "red",
 };
+
+/** Run statuses that need the owner's attention (M4: parked / over-budget too). */
+const ATTENTION_RUN_STATUSES: ReadonlySet<AgentRunStatus> = new Set([
+  "failed",
+  "parked",
+  "over_budget",
+]);
 
 function inMonth(iso: string, year: number, month: number): boolean {
   const date = new Date(iso);
@@ -108,7 +119,9 @@ export default async function OverviewPage() {
     spentPrevMonth > 0 ? ((spentThisMonth - spentPrevMonth) / spentPrevMonth) * 100 : undefined;
 
   const newLeads = leadsPage ? leadsPage.items.filter((lead) => lead.stage === "discovered").length : 0;
-  const failedRuns = runsPage ? runsPage.items.filter((run) => run.status === "failed").length : 0;
+  const attentionRuns = runsPage
+    ? runsPage.items.filter((run) => ATTENTION_RUN_STATUSES.has(run.status)).length
+    : 0;
   const recentRuns = runsPage ? runsPage.items.slice(0, 6) : [];
 
   const drawCountByStatus = (status: DrawStatus) =>
@@ -168,12 +181,14 @@ export default async function OverviewPage() {
             hint={`7 วันล่าสุด · ${changeCount.high} รายการระดับสูงขึ้นไป`}
           />
         </Link>
-        <StatCard
-          title="เอเจนต์ล้มเหลว"
-          value={String(failedRuns)}
-          icon={AlertTriangle}
-          hint="จากประวัติการทำงานล่าสุด"
-        />
+        <Link href="/agents" className="block" title="ไปที่เอเจนต์">
+          <StatCard
+            title="เอเจนต์ต้องดูแล"
+            value={String(attentionRuns)}
+            icon={AlertTriangle}
+            hint="ล้มเหลว · พักไว้ · เกินงบ"
+          />
+        </Link>
       </div>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-3">

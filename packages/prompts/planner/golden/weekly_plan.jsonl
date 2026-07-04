@@ -1,0 +1,1 @@
+{"input": {"period": "2569-W28", "inputs": "- milestone เลยกำหนด: งานไฟฟ้าชั้น 2 (Lipa Noi)\n- รายการโอนรอยืนยัน 2 รายการ\n- คู่แข่ง Villa Aroon ลดราคา 20%"}, "expected_qualities": ["first_line_is_แผนสัปดาห์_period", "top_3_items", "reasons_given", "thai_plain_text"]}

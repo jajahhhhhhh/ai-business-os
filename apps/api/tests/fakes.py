@@ -477,6 +477,194 @@ class FakeRunRecorder:
         self.rows.append(kwargs)
 
 
+# ------------------------------------------------------------ M4: agent runtime
+# Fakes for the agent gateway ports (src/application/agents/ports.py), the
+# AgentLlm seam, the Escalator and the budget CostAggregator. These import
+# only stdlib + the pure agents modules, so they stay usable without the
+# orchestrator package installed.
+
+import random as _random  # noqa: E402
+
+from src.application.agents.planning import PlannerInputs  # noqa: E402
+from src.application.agents.ports import (  # noqa: E402
+    ComposedReport,
+    DeliveredReport,
+    EvalCandidate,
+    LlmCompletion,
+    SignalEvent,
+)
+
+FAKE_LLM_MODEL = "fake-model"
+
+
+class FakeAgentLlm:
+    """AgentLlm with scripted responses: each complete() pops the next entry.
+
+    A None entry (or an exhausted script) means "LLM unavailable" — the agent
+    must fall back to its deterministic path (additive-enhancement contract).
+    """
+
+    def __init__(self, *responses: str | None) -> None:
+        self.responses: list[str | None] = list(responses)
+        self.calls: list[dict[str, Any]] = []
+
+    async def complete(
+        self,
+        *,
+        tier: str,
+        prompt: str,
+        max_tokens: int,
+        system: str | None = None,
+    ) -> LlmCompletion | None:
+        self.calls.append(
+            {"tier": tier, "prompt": prompt, "max_tokens": max_tokens, "system": system}
+        )
+        text = self.responses.pop(0) if self.responses else None
+        if text is None:
+            return None
+        return LlmCompletion(
+            text=text,
+            tokens_in=100,
+            tokens_out=50,
+            cost_usd=Decimal("0.0100"),
+            model=FAKE_LLM_MODEL,
+        )
+
+
+class FakeEscalator:
+    """Escalator recording (record, reason) pairs; never notifies anyone."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[Any, str]] = []
+
+    async def escalate(self, record: Any, reason: str) -> None:
+        self.calls.append((record, reason))
+
+
+class FakeCostAggregator:
+    """CostAggregator returning fixed per-agent sums (SqlDailyBudget tests)."""
+
+    def __init__(self, sums: dict[str, Decimal] | None = None) -> None:
+        self.sums = dict(sums or {})
+
+    async def agent_costs_today(self, now: datetime) -> dict[str, Decimal]:
+        return dict(self.sums)
+
+
+class ScriptedRng(_random.Random):
+    """random.Random whose random() pops scripted values (QA sampling tests)."""
+
+    def __init__(self, values: list[float]) -> None:
+        super().__init__(0)
+        self.values = list(values)
+
+    def random(self) -> float:  # type: ignore[override]
+        return self.values.pop(0) if self.values else 1.0
+
+
+def make_delivered(*, kind: str, period: str | None, body: str) -> DeliveredReport:
+    return DeliveredReport(
+        report_id=uuid.uuid4(),
+        kind=kind,
+        period=period,
+        lang="th",
+        body=body,
+        line_sent=False,
+        created_at=datetime.now(UTC),
+    )
+
+
+class FakeAnalyticsGateway:
+    """AnalyticsGateway with canned drafts; records deliveries + upgrades."""
+
+    UPGRADE_SUFFIX = f"\n\n{UPGRADE_ANALYSIS_HEADER}\nคู่แข่งขยับราคา"
+
+    DAILY_DRAFT = "สรุปประจำวัน 4 ก.ค. 2569\n- ยอดเบิกรอจ่าย: 1 รายการ\n" "สิ่งสำคัญที่สุด: ไม่มีเรื่องเร่งด่วน"
+    WEEKLY_DRAFT = "รายงานคู่แข่งประจำสัปดาห์ 22 มิ.ย. 2569 - 4 ก.ค. 2569\nยังไม่พบความเคลื่อนไหว"
+
+    def __init__(
+        self,
+        daily_draft: str = DAILY_DRAFT,
+        weekly_draft: str = WEEKLY_DRAFT,
+    ) -> None:
+        self.daily_draft = daily_draft
+        self.weekly_draft = weekly_draft
+        self.upgrade_calls: list[str] = []
+        self.delivered: list[DeliveredReport] = []
+
+    async def compose_daily(self) -> ComposedReport:
+        return ComposedReport(body=self.daily_draft, period="2026-07-04")
+
+    async def compose_weekly(self) -> ComposedReport:
+        return ComposedReport(body=self.weekly_draft, period="2026-W26")
+
+    async def upgrade_weekly(self, draft: str) -> str:
+        self.upgrade_calls.append(draft)
+        return draft + self.UPGRADE_SUFFIX
+
+    async def deliver(self, *, kind: str, period: str, body: str) -> DeliveredReport:
+        record = make_delivered(kind=kind, period=period, body=body)
+        self.delivered.append(record)
+        return record
+
+
+class FakeMemoryGateway:
+    """MemoryGateway over plain lists (consolidation + signal capture)."""
+
+    def __init__(
+        self,
+        events: list[SignalEvent] | None = None,
+        existing: list[tuple[str, str]] | None = None,
+    ) -> None:
+        self.events = list(events or [])
+        self.existing = list(existing or [])  # (subject, body) already remembered
+        self.remembered: list[tuple[str, str]] = []
+        self.consolidate_calls = 0
+
+    async def consolidate(self) -> tuple[int, int]:
+        self.consolidate_calls += 1
+        return (2, 1)
+
+    async def recent_high_severity_events(self, hours: int) -> list[SignalEvent]:
+        return list(self.events)
+
+    async def find_similar(self, subject: str, body: str) -> list[tuple[str, str]]:
+        return list(self.existing) + list(self.remembered)
+
+    async def remember_signal(self, *, subject: str, body: str) -> None:
+        self.remembered.append((subject, body))
+
+
+class FakePlannerGateway:
+    """PlannerGateway returning fixed inputs; records deliveries."""
+
+    def __init__(self, inputs: PlannerInputs | None = None) -> None:
+        self.inputs = inputs or PlannerInputs()
+        self.delivered: list[DeliveredReport] = []
+
+    async def gather_inputs(self) -> PlannerInputs:
+        return self.inputs
+
+    async def deliver(self, *, period: str, body: str) -> DeliveredReport:
+        record = make_delivered(kind="planning", period=period, body=body)
+        self.delivered.append(record)
+        return record
+
+
+class FakeQaGateway:
+    """QaGateway over a fixed candidate list; records written evals."""
+
+    def __init__(self, candidates: list[EvalCandidate] | None = None) -> None:
+        self.candidates = list(candidates or [])
+        self.evals: list[dict[str, Any]] = []
+
+    async def eval_candidates(self, days: int) -> list[EvalCandidate]:
+        return list(self.candidates)
+
+    async def write_eval(self, *, run_id: uuid.UUID, rubric: str, score: int, notes: str) -> None:
+        self.evals.append({"run_id": run_id, "rubric": rubric, "score": score, "notes": notes})
+
+
 @dataclass
 class FakeCompetitorRow:
     id: uuid.UUID

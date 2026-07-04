@@ -6,6 +6,7 @@
 
 import type {
   AgentRunStatus,
+  AgentTaskName,
   BankTransactionDirection,
   BankTransactionStatus,
   ChangeCategory,
@@ -224,6 +225,36 @@ export const RUN_STATUS_LABELS: Record<AgentRunStatus, LocalizedText> = {
   running: { th: "กำลังทำงาน", en: "Running" },
   succeeded: { th: "สำเร็จ", en: "Succeeded" },
   failed: { th: "ล้มเหลว", en: "Failed" },
+  parked: { th: "พักไว้", en: "Parked" },
+  over_budget: { th: "เกินงบ", en: "Over budget" },
+};
+
+/**
+ * Agent slugs → owner-facing labels. The API stores `agent` as a free string —
+ * always resolve through agentLabel() so an unknown agent never crashes.
+ */
+export const AGENT_LABELS: Record<string, LocalizedText> = {
+  analytics: { th: "วิเคราะห์", en: "Analytics" },
+  planner: { th: "วางแผน", en: "Planner" },
+  memory: { th: "ความจำ", en: "Memory" },
+  qa: { th: "ตรวจคุณภาพ", en: "QA" },
+  "change-analyst": { th: "วิเคราะห์คู่แข่ง", en: "Change analyst" },
+};
+
+/** Thai label for an agent slug; falls back to the raw value. */
+export function agentLabel(agent: string, locale: Locale = DEFAULT_LOCALE): string {
+  const entry = AGENT_LABELS[agent.toLowerCase()];
+  return entry ? entry[locale] : agent;
+}
+
+/** Trigger-able agent tasks (POST /v1/agents/{name}:trigger) → button labels. */
+export const AGENT_TASK_LABELS: Record<AgentTaskName, LocalizedText> = {
+  "analytics-daily": { th: "สรุปรายวัน", en: "Daily summary" },
+  "analytics-weekly": { th: "รายงานคู่แข่งสัปดาห์", en: "Weekly competitor report" },
+  planner: { th: "แผนสัปดาห์", en: "Weekly plan" },
+  "memory-consolidate": { th: "รวมความจำ", en: "Consolidate memory" },
+  "memory-capture": { th: "เก็บสัญญาณคู่แข่ง", en: "Capture competitor signals" },
+  "qa-evaluate": { th: "ตรวจคุณภาพ", en: "Run QA evaluation" },
 };
 
 export const REPORT_KIND_LABELS: Record<ReportKind, LocalizedText> = {

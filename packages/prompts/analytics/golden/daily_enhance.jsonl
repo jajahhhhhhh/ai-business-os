@@ -1,0 +1,1 @@
+{"input": {"snapshot": "สรุปประจำวัน 4 ก.ค. 2569\n[Lipa Noi]\n- ยอดเบิกรอจ่าย: 2 รายการ รวม ฿150,000\n- งวดที่รอการยืนยัน: 1 รายการ"}, "expected_qualities": ["bullets_only", "1_to_3_bullets", "thai", "actionable"]}

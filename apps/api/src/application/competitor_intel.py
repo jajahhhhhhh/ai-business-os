@@ -367,15 +367,14 @@ class CompetitorIntelUseCases:
 
     # ------------------------------------------------------- weekly report
 
-    async def generate_weekly_report(
-        self, actor: str, now: datetime | None = None
-    ) -> WeeklyReportResult:
-        """Compose (deterministic Thai draft) -> LLM upgrade -> store + LINE.
+    async def compose_weekly_draft(self, now: datetime | None = None) -> tuple[str, str, int]:
+        """Deterministic weekly draft: (draft, period, event_count). No writes.
 
         Window: the last Bangkok week — from Monday 00:00 of the previous week
         (week_start_bangkok - 7 days) up to now, so the Monday 08:00 beat run
         reports on the week that just ended and ad-hoc runs include fresh
-        events. The report period is the ISO week of the window start.
+        events. The report period is the ISO week of the window start. Split
+        out in M4 so the analytics agent owns the LLM-upgrade step.
         """
         now = (now or datetime.now(BANGKOK_TZ)).astimezone(BANGKOK_TZ)
         since = week_start_bangkok(now) - timedelta(days=WEEKLY_REPORT_DAYS)
@@ -394,14 +393,28 @@ class CompetitorIntelUseCases:
             for row in _severity_sorted(rows)
         )
         draft = compose_weekly_report(since.date(), now.date(), events)
+        return draft, period, len(events)
 
+    async def upgrade_weekly_draft(self, draft: str) -> str:
+        """LLM upgrade with the never-raise fallback contract."""
         try:
             body = await self._analyst.upgrade_weekly_report(draft)
         except Exception:  # noqa: BLE001 - contract says never raise; belt-and-braces
             logger.exception("weekly_report_upgrade_failed")
             body = draft
-        body = body or draft
+        return body or draft
 
+    async def deliver_weekly(
+        self,
+        actor: str,
+        body: str,
+        *,
+        period: str,
+        events: int,
+        now: datetime | None = None,
+    ) -> WeeklyReportResult:
+        """Push to LINE (clipped, best-effort) then store + audit the report."""
+        now = (now or datetime.now(BANGKOK_TZ)).astimezone(BANGKOK_TZ)
         line_sent = False
         if self._line_push is not None:
             try:
@@ -426,11 +439,23 @@ class CompetitorIntelUseCases:
             {
                 "kind": "weekly",
                 "period": period,
-                "events": len(events),
+                "events": events,
                 "line_sent": line_sent,
             },
         )
         return WeeklyReportResult(report=report, line_sent=line_sent)
+
+    async def generate_weekly_report(
+        self, actor: str, now: datetime | None = None
+    ) -> WeeklyReportResult:
+        """Compose (deterministic Thai draft) -> LLM upgrade -> store + LINE.
+
+        One-shot M3 behavior, now composed from the M4 split steps.
+        """
+        now = (now or datetime.now(BANGKOK_TZ)).astimezone(BANGKOK_TZ)
+        draft, period, event_count = await self.compose_weekly_draft(now)
+        body = await self.upgrade_weekly_draft(draft)
+        return await self.deliver_weekly(actor, body, period=period, events=event_count, now=now)
 
 
 def _severity_sorted(

@@ -1,22 +1,30 @@
-"""Celery worker + beat schedule (M1 + M2 + M3).
+"""Celery worker + beat schedule (M1 + M2 + M3 + M4 agents).
 
 Production tasks:
 - sync_bank_alerts    — poll Gmail for Thai bank alerts every 2 h (skips cleanly
                         when Gmail credentials are unset)
-- send_daily_snapshot — 07:30 Asia/Bangkok Thai snapshot, stored + pushed to LINE
+- send_daily_snapshot — 07:30 Asia/Bangkok; since M4 the body runs the
+                        ANALYTICS agent ('daily-snapshot') — task name stable
 - process_document    — M2 KB ingestion pipeline (parse -> chunk -> index),
                         dispatched per upload by POST /v1/kb/documents
-- consolidate_memories — Sun 03:00 Asia/Bangkok memory merge + expiry (§13)
+- consolidate_memories — Sun 03:00 Asia/Bangkok; routes through the MEMORY
+                        agent ('consolidate') since M4 — task name stable
 - sweep_all_competitors — 06:00 Asia/Bangkok daily competitor-source sweep (M3)
 - sweep_competitor    — one-competitor sweep, dispatched by POST
                         /v1/competitors/{id}:check
-- weekly_competitor_report — Mon 08:00 Asia/Bangkok Thai competitor report
+- weekly_competitor_report — Mon 08:00 Asia/Bangkok; since M4 the body runs
+                        the ANALYTICS agent ('weekly-competitor')
+- run_agent_task      — generic M4 agent runner: (agent_name, task_kind).
+                        Beat: memory capture-signals 07:00 daily, planner
+                        weekly-plan Mon 08:30, qa evaluate Sun 04:30.
 
 Tasks are sync Celery functions wrapping the async use cases with asyncio.run;
 each run builds and disposes its own engine so worker processes never leak
 connections across task invocations. Gateway adapters come from the shared
 build_kb_adapters / build_competitor_adapters helpers
-(src/infrastructure/adapters.py).
+(src/infrastructure/adapters.py). The orchestrator-backed agent runtime is
+imported lazily inside the task bodies (collectors pattern) so this module
+stays importable when the orchestrator package is absent.
 """
 
 from __future__ import annotations
@@ -33,9 +41,7 @@ from src.application.bank_transactions import BankTransactionUseCases
 from src.application.competitor_intel import CompetitorIntelUseCases
 from src.application.errors import UnrecognizedBankAlertError
 from src.application.kb import ERROR_MAX_CHARS, KnowledgeBaseUseCases
-from src.application.memory import MemoryUseCases
 from src.application.renovation import RenovationUseCases
-from src.application.snapshot import DailySnapshotUseCases
 from src.config import get_settings
 from src.infrastructure.adapters import (
     CompetitorAdapters,
@@ -51,9 +57,7 @@ from src.infrastructure.repositories import (
     BankTransactionSqlRepository,
     CompetitorIntelSqlRepository,
     KnowledgeBaseSqlRepository,
-    MemorySqlRepository,
     RenovationSqlRepository,
-    SnapshotSqlRepository,
 )
 from src.logging_setup import configure_logging
 
@@ -92,6 +96,24 @@ celery_app.conf.beat_schedule = {
     "weekly-competitor-report-mon-0800": {
         "task": "src.worker.weekly_competitor_report",
         "schedule": crontab(minute=0, hour=8, day_of_week="mon"),
+    },
+    # M4: memory agent captures high-severity competitor signals daily 07:00.
+    "memory-capture-signals-0700": {
+        "task": "src.worker.run_agent_task",
+        "schedule": crontab(minute=0, hour=7),
+        "args": ("memory", "capture-signals"),
+    },
+    # M4: planner weekly Thai plan Mon 08:30 Asia/Bangkok.
+    "planner-weekly-plan-mon-0830": {
+        "task": "src.worker.run_agent_task",
+        "schedule": crontab(minute=30, hour=8, day_of_week="mon"),
+        "args": ("planner", "weekly-plan"),
+    },
+    # M4: qa evaluation sweep Sun 04:30 Asia/Bangkok (§13 prompt/eval slot).
+    "qa-evaluate-sun-0430": {
+        "task": "src.worker.run_agent_task",
+        "schedule": crontab(minute=30, hour=4, day_of_week="sun"),
+        "args": ("qa", "evaluate"),
     },
 }
 
@@ -137,24 +159,51 @@ async def _sync_bank_alerts() -> dict[str, int]:
     return counts
 
 
-async def _send_daily_snapshot() -> dict[str, object]:
+# ---------------------------------------------------------------- M4: agents
+
+
+async def _run_agent(agent_name: str, task_kind: str) -> dict[str, object]:
+    """Run one agent task with per-run engine/adapters/runtime; NEVER raises
+    (run_agent itself absorbs everything; this adds setup/teardown safety).
+
+    The agent runtime import is lazy (collectors pattern) so the worker module
+    imports cleanly without the orchestrator package; the task then reports a
+    failed status instead of crashing the worker.
+    """
     settings = get_settings()
-    line = LineClient(settings.line_channel_access_token, settings.line_owner_user_id)
     engine = build_engine(settings.database_url)
+    maker = build_sessionmaker(engine)
+    competitor_adapters = build_competitor_adapters(settings, maker)
+    runtime = None
     try:
-        maker = build_sessionmaker(engine)
-        async with maker() as session:
-            use_cases = DailySnapshotUseCases(
-                SnapshotSqlRepository(session),
-                SqlAuditWriter(session),
-                line_push=line.push_text if line.is_configured else None,
-            )
-            result = await use_cases.generate(WORKER_ACTOR)
-            await session.commit()
+        from src.infrastructure.agent_runtime import build_agent_runtime, run_agent
+
+        runtime = build_agent_runtime(settings, maker)
+        return await run_agent(
+            agent_name,
+            task_kind,
+            settings=settings,
+            maker=maker,
+            runtime=runtime,
+            kb_adapters=build_kb_adapters(settings),
+            competitor_adapters=competitor_adapters,
+            actor=WORKER_ACTOR,
+        )
+    except Exception as exc:  # noqa: BLE001 - never raise out of a worker task
+        logger.exception("run_agent_setup_failed", agent=agent_name, task_kind=task_kind)
+        return {
+            "agent": agent_name,
+            "task_kind": task_kind,
+            "run_id": None,
+            "status": "failed",
+            "error": str(exc)[:ERROR_MAX_CHARS],
+            "outputs": [],
+        }
     finally:
+        if runtime is not None:
+            await runtime.aclose()
+        await competitor_adapters.aclose()
         await engine.dispose()
-    logger.info("daily_snapshot_done", report_id=str(result.report.id), line_sent=result.line_sent)
-    return {"report_id": str(result.report.id), "line_sent": result.line_sent}
 
 
 # --------------------------------------------------------------------- M2: KB
@@ -224,27 +273,6 @@ async def _process_document(document_id: str) -> dict[str, str]:
         await engine.dispose()
 
 
-async def _consolidate_memories() -> dict[str, int]:
-    settings = get_settings()
-    engine = build_engine(settings.database_url)
-    adapters = build_kb_adapters(settings)
-    try:
-        maker = build_sessionmaker(engine)
-        async with maker() as session:
-            use_cases = MemoryUseCases(
-                MemorySqlRepository(session),
-                SqlAuditWriter(session),
-                vector_index=adapters.vector_index,
-                embedder=adapters.embedder,
-            )
-            result = await use_cases.consolidate(WORKER_ACTOR)
-            await session.commit()
-    finally:
-        await engine.dispose()
-    logger.info("consolidate_memories_done", merged=result.merged, expired=result.expired)
-    return {"merged": result.merged, "expired": result.expired}
-
-
 # -------------------------------------------------------- M3: competitor intel
 
 
@@ -306,27 +334,6 @@ async def _sweep_competitors(competitor_id: uuid.UUID | None) -> dict[str, objec
         await engine.dispose()
 
 
-async def _weekly_competitor_report() -> dict[str, object]:
-    settings = get_settings()
-    engine = build_engine(settings.database_url)
-    maker = build_sessionmaker(engine)
-    adapters = build_competitor_adapters(settings, maker)
-    try:
-        async with maker() as session:
-            use_cases = _competitor_use_cases(session, adapters, with_line=True)
-            result = await use_cases.generate_weekly_report(WORKER_ACTOR)
-            await session.commit()
-    finally:
-        await adapters.aclose()
-        await engine.dispose()
-    logger.info(
-        "weekly_competitor_report_done",
-        report_id=str(result.report.id),
-        line_sent=result.line_sent,
-    )
-    return {"report_id": str(result.report.id), "line_sent": result.line_sent}
-
-
 @celery_app.task(name="src.worker.sync_bank_alerts", bind=True, max_retries=3)
 def sync_bank_alerts(self) -> dict[str, int]:  # noqa: ANN001 - celery bind
     try:
@@ -335,12 +342,16 @@ def sync_bank_alerts(self) -> dict[str, int]:  # noqa: ANN001 - celery bind
         raise self.retry(exc=exc, countdown=60 * (2**self.request.retries)) from exc
 
 
-@celery_app.task(name="src.worker.send_daily_snapshot", bind=True, max_retries=3)
+@celery_app.task(name="src.worker.send_daily_snapshot", bind=True)
 def send_daily_snapshot(self) -> dict[str, object]:  # noqa: ANN001 - celery bind
+    """M4: the 07:30 snapshot runs the analytics agent (task name stable).
+    No Celery retry: retries/escalation/parking are the Runner's job and
+    _run_agent never raises."""
     try:
-        return asyncio.run(_send_daily_snapshot())
-    except Exception as exc:
-        raise self.retry(exc=exc, countdown=60 * (2**self.request.retries)) from exc
+        return asyncio.run(_run_agent("analytics", "daily-snapshot"))
+    except Exception:  # noqa: BLE001 - defensive: even setup failures stay in-task
+        logger.exception("send_daily_snapshot_task_error")
+        return {"status": "failed"}
 
 
 @celery_app.task(name="src.worker.process_document", bind=True)
@@ -355,12 +366,15 @@ def process_document(self, document_id: str) -> dict[str, str]:  # noqa: ANN001 
         return {"document_id": document_id, "status": "failed"}
 
 
-@celery_app.task(name="src.worker.consolidate_memories", bind=True, max_retries=3)
-def consolidate_memories(self) -> dict[str, int]:  # noqa: ANN001 - celery bind
+@celery_app.task(name="src.worker.consolidate_memories", bind=True)
+def consolidate_memories(self) -> dict[str, object]:  # noqa: ANN001 - celery bind
+    """M4: Sun 03:00 consolidation routes through the memory agent (task name
+    stable; failure handling is the Runner's job)."""
     try:
-        return asyncio.run(_consolidate_memories())
-    except Exception as exc:  # transient DB failures retry with backoff
-        raise self.retry(exc=exc, countdown=60 * (2**self.request.retries)) from exc
+        return asyncio.run(_run_agent("memory", "consolidate"))
+    except Exception:  # noqa: BLE001 - defensive: even setup failures stay in-task
+        logger.exception("consolidate_memories_task_error")
+        return {"status": "failed"}
 
 
 @celery_app.task(name="src.worker.sweep_competitor", bind=True)
@@ -384,9 +398,24 @@ def sweep_all_competitors(self) -> dict[str, object]:  # noqa: ANN001 - celery b
         return {"status": "failed"}
 
 
-@celery_app.task(name="src.worker.weekly_competitor_report", bind=True, max_retries=3)
+@celery_app.task(name="src.worker.weekly_competitor_report", bind=True)
 def weekly_competitor_report(self) -> dict[str, object]:  # noqa: ANN001 - celery bind
+    """M4: Mon 08:00 weekly report runs the analytics agent (task name stable)."""
     try:
-        return asyncio.run(_weekly_competitor_report())
-    except Exception as exc:  # transient DB failures retry with backoff
-        raise self.retry(exc=exc, countdown=60 * (2**self.request.retries)) from exc
+        return asyncio.run(_run_agent("analytics", "weekly-competitor"))
+    except Exception:  # noqa: BLE001 - defensive: even setup failures stay in-task
+        logger.exception("weekly_competitor_report_task_error")
+        return {"status": "failed"}
+
+
+@celery_app.task(name="src.worker.run_agent_task", bind=True)
+def run_agent_task(self, agent_name: str, task_kind: str) -> dict[str, object]:  # noqa: ANN001
+    """Generic M4 agent runner (beat + POST /v1/agents/{name}:trigger).
+
+    No Celery retry: retry/escalate/park is the orchestrator Runner's job and
+    _run_agent never raises."""
+    try:
+        return asyncio.run(_run_agent(agent_name, task_kind))
+    except Exception:  # noqa: BLE001 - defensive: even setup failures stay in-task
+        logger.exception("run_agent_task_error", agent=agent_name, task_kind=task_kind)
+        return {"agent": agent_name, "task_kind": task_kind, "status": "failed"}

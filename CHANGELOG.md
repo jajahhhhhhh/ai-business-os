@@ -5,6 +5,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+### Added — M4 Agent runtime + QA
+- Orchestrator wired into production: agent runs execute through the traced,
+  budgeted Runner (retry → escalate to LINE → park, never silently dropped);
+  budgets survive restarts by seeding from `agent_runs` spend; per-agent USD
+  caps via `AGENT_BUDGETS_JSON`.
+- Agents live: **analytics** (daily snapshot + weekly competitor report now
+  agent-generated with additive LLM "คำแนะนำวันนี้"/executive sections),
+  **memory** (consolidation + capture of high-severity competitor signals),
+  **planner** (Monday "แผนสัปดาห์" top-3 focus report with rule-based
+  fallback), **qa** (Sunday eval sampling — deterministic rubric checks
+  blended with LLM scoring — written to `agent_evals`).
+- Prompts moved to versioned Jinja2 templates in `packages/prompts` (with
+  in-code fallbacks and golden regression cases exercised in CI).
+- Cost dashboard: per-agent today budget bars, 7-day stacked cost chart,
+  eval scores, manual agent triggers; `GET /v1/agents/costs`, `/evals`,
+  `POST /v1/agents/{name}:trigger` (§11 complete except /v1/kb upload UI
+  parity — kb endpoints shipped in M2).
+
 ### Added — M3 Competitor intelligence
 - Competitor registry with per-competitor monitored sources (website/RSS);
   Facebook/Airbnb/Booking/Agoda URLs refused at registration with a Thai

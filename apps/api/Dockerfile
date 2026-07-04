@@ -28,7 +28,8 @@ RUN pip install \
     "httpx>=0.27" \
     "python-multipart>=0.0.12" \
     "boto3>=1.35" \
-    "qdrant-client>=1.12"
+    "qdrant-client>=1.12" \
+    "jinja2>=3.1"
 
 # M2 document parsing (mirrors pyproject [project.optional-dependencies].parsing).
 RUN pip install \
@@ -41,13 +42,17 @@ RUN pip install \
 ARG INSTALL_ML=true
 RUN if [ "$INSTALL_ML" = "true" ]; then pip install "sentence-transformers>=3.2"; fi
 
-# Shared compliance-gated collectors library (§8.4) — used by the M3 sweep.
+# Shared monorepo libraries: compliance-gated collectors (§8.4, M3 sweep) and
+# the agent runtime (§5, M4 orchestrator).
 COPY services/collectors /tmp/collectors
-RUN pip install /tmp/collectors && rm -rf /tmp/collectors
+COPY services/orchestrator /tmp/orchestrator
+RUN pip install /tmp/collectors /tmp/orchestrator && rm -rf /tmp/collectors /tmp/orchestrator
 
 COPY apps/api/src ./src
 COPY apps/api/alembic ./alembic
 COPY apps/api/alembic.ini ./
+# Versioned prompt templates (packages/prompts) — loader default /app/prompts.
+COPY packages/prompts ./prompts
 
 # ---------------------------------------------------------------- runtime
 FROM python:3.12-slim

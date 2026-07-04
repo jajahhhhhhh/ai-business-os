@@ -8,8 +8,12 @@
  */
 
 import type {
+  AgentCost,
+  AgentEval,
+  AgentEvalListParams,
   AgentRun,
   AgentRunListParams,
+  AgentTaskName,
   BankAlertIngest,
   BankTransaction,
   BankTransactionListParams,
@@ -47,6 +51,7 @@ import type {
   ReportListParams,
   Site,
   SiteSummary,
+  TriggerResponse,
   WeeklyCompetitorReport,
 } from "./types";
 
@@ -254,8 +259,38 @@ export async function listAgentRuns(
   const data = await get<AgentRun[] | Paginated<AgentRun>>("/agents/runs", {
     agent: params.agent,
     status: params.status,
+    limit: params.limit,
   });
   return Array.isArray(data) ? { items: data, next_cursor: null } : data;
+}
+
+// ---------------------------------------------------------------------------
+// Agent cost dashboard (M4) — reads for server components
+// ---------------------------------------------------------------------------
+
+/** GET /v1/agents/costs?days=7 — per-agent daily spend, ordered agent → day. */
+export function listAgentCosts(days = 7): Promise<AgentCost[]> {
+  return get<AgentCost[]>("/agents/costs", { days });
+}
+
+/** GET /v1/agents/evals — QA rubric scores, newest first. */
+export function listAgentEvals(params: AgentEvalListParams = {}): Promise<AgentEval[]> {
+  return get<AgentEval[]>("/agents/evals", {
+    agent: params.agent,
+    limit: params.limit,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Agent cost dashboard (M4) — mutations for `use client` components
+// ---------------------------------------------------------------------------
+
+/**
+ * POST /v1/agents/{name}:trigger → 202 { agent, detail }. Unknown task names
+ * get a 404 problem+json — thrown as ApiError with a display-ready detail.
+ */
+export function triggerAgentTask(name: AgentTaskName): Promise<TriggerResponse> {
+  return mutate<TriggerResponse>("POST", `/agents/${encodeURIComponent(name)}:trigger`);
 }
 
 export function listReports(params: ReportListParams = {}): Promise<Report[]> {

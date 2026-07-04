@@ -36,6 +36,9 @@ from src.logging_setup import configure_logging
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
+    runtime = getattr(app.state, "agent_runtime", None)
+    if runtime is not None:
+        await runtime.aclose()
     await app.state.competitor_adapters.aclose()
     await app.state.engine.dispose()
 
@@ -45,11 +48,15 @@ def create_app(
     *,
     kb_adapters: KbAdapters | None = None,
     competitor_adapters: CompetitorAdapters | None = None,
+    agent_runtime: object | None = None,
 ) -> FastAPI:
-    """Build the app. `kb_adapters` (M2) and `competitor_adapters` (M3) are
-    test seams: integration tests inject in-memory fakes (tests/fakes.py) so
-    they run with only PostgreSQL available; production wiring comes from
-    build_kb_adapters / build_competitor_adapters."""
+    """Build the app. `kb_adapters` (M2), `competitor_adapters` (M3) and
+    `agent_runtime` (M4) are test seams: integration tests inject in-memory
+    fakes (tests/fakes.py) so they run with only PostgreSQL available;
+    production wiring comes from build_kb_adapters / build_competitor_adapters
+    / build_agent_runtime. `agent_runtime` stays None here and is built
+    LAZILY on first use (interfaces/dependencies.get_agent_runtime) so
+    create_app never imports the orchestrator package."""
     settings = settings or get_settings()
     configure_logging(settings)
 
@@ -69,6 +76,7 @@ def create_app(
     app.state.competitor_adapters = competitor_adapters or build_competitor_adapters(
         settings, app.state.sessionmaker
     )
+    app.state.agent_runtime = agent_runtime  # None -> built lazily on first use
 
     app.add_middleware(RequestContextMiddleware)
     register_exception_handlers(app)

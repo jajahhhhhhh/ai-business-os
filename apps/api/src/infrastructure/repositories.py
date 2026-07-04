@@ -19,6 +19,7 @@ from src.domain.cursor import Cursor
 from src.domain.draws import DrawStatus
 from src.domain.leads import LeadStage
 from src.infrastructure.models import (
+    AgentEval,
     AgentRun,
     BankTransaction,
     ChangeEvent,
@@ -832,6 +833,31 @@ class CompetitorIntelSqlRepository:
         return report
 
 
+@dataclass(frozen=True, slots=True)
+class AgentCostData:
+    """One (agent, Bangkok-local day) cost aggregation row (M4)."""
+
+    agent: str
+    day: date
+    cost_usd: Decimal
+    tokens_in: int
+    tokens_out: int
+    runs: int
+
+
+@dataclass(frozen=True, slots=True)
+class AgentEvalDisplayData:
+    """An agent_evals row joined with its run's agent name (M4)."""
+
+    id: uuid.UUID
+    run_id: uuid.UUID
+    agent: str
+    rubric: str
+    score: Decimal
+    notes: str | None
+    created_at: datetime
+
+
 class AgentSqlRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -853,6 +879,59 @@ class AgentSqlRepository:
             stmt = stmt.where(Report.kind == kind)
         stmt = stmt.order_by(Report.created_at.desc()).limit(limit)
         return (await self._session.execute(stmt)).scalars().all()
+
+    async def daily_costs(self, since: datetime) -> list[AgentCostData]:
+        """Per-agent per-Bangkok-day cost sums, ordered agent then day."""
+        day = sa.cast(sa.func.timezone("Asia/Bangkok", AgentRun.started_at), sa.Date()).label("day")
+        zero = sa.literal(Decimal("0"), sa.Numeric(10, 4))
+        stmt = (
+            sa.select(
+                AgentRun.agent,
+                day,
+                sa.func.coalesce(sa.func.sum(AgentRun.cost_usd), zero).label("cost_usd"),
+                sa.func.coalesce(sa.func.sum(AgentRun.tokens_in), 0).label("tokens_in"),
+                sa.func.coalesce(sa.func.sum(AgentRun.tokens_out), 0).label("tokens_out"),
+                sa.func.count(AgentRun.id).label("runs"),
+            )
+            .where(AgentRun.started_at >= since)
+            .group_by(AgentRun.agent, day)
+            .order_by(AgentRun.agent, day)
+        )
+        return [
+            AgentCostData(
+                agent=row.agent,
+                day=row.day,
+                cost_usd=row.cost_usd,
+                tokens_in=int(row.tokens_in),
+                tokens_out=int(row.tokens_out),
+                runs=int(row.runs),
+            )
+            for row in (await self._session.execute(stmt)).all()
+        ]
+
+    async def list_evals(self, agent: str | None, limit: int) -> list[AgentEvalDisplayData]:
+        """agent_evals newest first, joined with agent_runs for the agent name."""
+        stmt = (
+            sa.select(AgentEval, AgentRun.agent.label("agent"))
+            .join(AgentRun, AgentEval.run_id == AgentRun.id)
+            .order_by(AgentEval.created_at.desc(), AgentEval.id.desc())
+            .limit(limit)
+        )
+        if agent:
+            stmt = stmt.where(AgentRun.agent == agent)
+        rows = (await self._session.execute(stmt)).all()
+        return [
+            AgentEvalDisplayData(
+                id=row.AgentEval.id,
+                run_id=row.AgentEval.run_id,
+                agent=row.agent,
+                rubric=row.AgentEval.rubric,
+                score=row.AgentEval.score,
+                notes=row.AgentEval.notes,
+                created_at=row.AgentEval.created_at,
+            )
+            for row in rows
+        ]
 
 
 class JobSqlRepository:

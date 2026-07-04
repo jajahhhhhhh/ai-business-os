@@ -1,10 +1,22 @@
-"""Report archive + daily Thai snapshot (M1) + weekly competitor report (M3)."""
+"""Report archive + daily Thai snapshot (M1) + weekly competitor report (M3).
+
+Since M4 the two :generate endpoints execute the ANALYTICS AGENT synchronously
+(gather -> llm-enhance -> deliver through the orchestrator Runner, traced in
+agent_runs) and return the exact same SnapshotReportOut contract the web app
+depends on. When the agent path cannot deliver — orchestrator missing, agent
+over its daily cap, run parked — the endpoint falls back to the original
+deterministic use-case path so a report is ALWAYS generated (enhancement is
+additive, never load-bearing).
+"""
 
 from __future__ import annotations
 
+import uuid
+from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Query
+import structlog
+from fastapi import APIRouter, Query, Request
 
 from src.application.competitor_intel import CompetitorIntelUseCases
 from src.application.snapshot import DailySnapshotUseCases
@@ -23,6 +35,8 @@ from src.interfaces.dependencies import (
 )
 from src.interfaces.schemas import ReportOut, SnapshotReportOut
 
+logger = structlog.get_logger("api.reports")
+
 router = APIRouter(prefix="/reports", tags=["reports"])
 
 
@@ -37,14 +51,67 @@ async def list_reports(
     return [ReportOut.model_validate(report) for report in reports]
 
 
+async def _generate_via_agent(
+    request: Request, task_kind: str, actor: str
+) -> SnapshotReportOut | None:
+    """Run the analytics agent inline; None when it did not deliver a report
+    (over budget / parked / orchestrator unavailable) — callers fall back."""
+    from src.infrastructure.agent_runtime import run_agent
+    from src.interfaces.dependencies import get_agent_runtime
+
+    state = request.app.state
+    result = await run_agent(
+        "analytics",
+        task_kind,
+        settings=state.settings,
+        maker=state.sessionmaker,
+        runtime=get_agent_runtime(request),
+        kb_adapters=state.kb_adapters,
+        competitor_adapters=state.competitor_adapters,
+        actor=actor,
+    )
+    output = next((o for o in result["outputs"] if isinstance(o, dict) and "report_id" in o), None)
+    if output is None:
+        logger.warning(
+            "report_agent_no_delivery",
+            task_kind=task_kind,
+            status=result["status"],
+            error=result["error"],
+        )
+        return None
+    return SnapshotReportOut(
+        id=uuid.UUID(output["report_id"]),
+        kind=output["kind"],
+        period=output["period"],
+        lang=output["lang"],
+        body=output["body"],
+        line_sent=output["line_sent"],
+        created_at=datetime.fromisoformat(output["created_at"]),
+    )
+
+
+async def _agent_path(request: Request, task_kind: str, actor: str) -> SnapshotReportOut | None:
+    try:
+        return await _generate_via_agent(request, task_kind, actor)
+    except Exception:  # noqa: BLE001 - agent path is best-effort; fallback below
+        logger.exception("report_agent_path_failed", task_kind=task_kind)
+        return None
+
+
 @router.post("/daily-snapshot:generate", response_model=SnapshotReportOut, status_code=201)
 async def generate_daily_snapshot(
-    session: SessionDep, settings: SettingsDep, principal: PrincipalDep
+    request: Request, session: SessionDep, settings: SettingsDep, principal: PrincipalDep
 ) -> SnapshotReportOut:
     """Build today's Thai snapshot, store it, and push to LINE when configured.
 
-    Same code path as the 07:30 Celery beat job (src/worker.py).
+    Same code path as the 07:30 Celery beat job (analytics agent since M4);
+    the response contract is unchanged from M1.
     """
+    generated = await _agent_path(request, "daily-snapshot", principal.actor)
+    if generated is not None:
+        return generated
+
+    # Deterministic fallback: the original M1 path (no LLM enhancement).
     line = LineClient(settings.line_channel_access_token, settings.line_owner_user_id)
     use_cases = DailySnapshotUseCases(
         SnapshotSqlRepository(session),
@@ -65,6 +132,7 @@ async def generate_daily_snapshot(
 
 @router.post("/weekly-competitor:generate", response_model=SnapshotReportOut, status_code=201)
 async def generate_weekly_competitor_report(
+    request: Request,
     session: SessionDep,
     settings: SettingsDep,
     adapters: CompetitorAdaptersDep,
@@ -72,8 +140,14 @@ async def generate_weekly_competitor_report(
 ) -> SnapshotReportOut:
     """Compose last week's Thai competitor report, store it, push to LINE.
 
-    Same code path as the Monday 08:00 Celery beat job (src/worker.py).
+    Same code path as the Monday 08:00 Celery beat job (analytics agent since
+    M4); the response contract is unchanged from M3.
     """
+    generated = await _agent_path(request, "weekly-competitor", principal.actor)
+    if generated is not None:
+        return generated
+
+    # Deterministic fallback: the original M3 path.
     line = LineClient(settings.line_channel_access_token, settings.line_owner_user_id)
     use_cases = CompetitorIntelUseCases(
         CompetitorIntelSqlRepository(session),

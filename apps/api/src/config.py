@@ -6,7 +6,19 @@ from decimal import Decimal
 from functools import lru_cache
 from typing import Literal
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _default_agent_budgets() -> dict[str, Decimal]:
+    """Per-agent daily USD caps (M4). Env override: AGENT_BUDGETS_JSON."""
+    return {
+        "analytics": Decimal("1.00"),
+        "planner": Decimal("0.50"),
+        "memory": Decimal("0.20"),
+        "qa": Decimal("0.50"),
+        "change-analyst": Decimal("2.00"),
+    }
 
 
 class MissingSecretError(RuntimeError):
@@ -20,6 +32,10 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        # agent_budgets uses validation_alias AGENT_BUDGETS_JSON for its env
+        # var; populate_by_name keeps Settings(agent_budgets=...) working in
+        # tests and factories.
+        populate_by_name=True,
     )
 
     env: Literal["dev", "prod"] = "dev"
@@ -43,6 +59,18 @@ class Settings(BaseSettings):
     # Hard daily spend cap across all agents; at/over -> LLM calls fall back
     # to rule-based paths. Env: LLM_DAILY_BUDGET_USD.
     llm_daily_budget_usd: Decimal = Decimal("5.00")
+
+    # M4 agent runtime: per-agent daily USD caps enforced by the orchestrator
+    # Runner via SqlDailyBudget. Env override: AGENT_BUDGETS_JSON, a JSON
+    # object like {"analytics": 1.0, "planner": 0.5}. Unknown agents default
+    # to a zero cap and never run.
+    agent_budgets: dict[str, Decimal] = Field(
+        default_factory=_default_agent_budgets,
+        validation_alias="AGENT_BUDGETS_JSON",
+    )
+    # Prompt-template root (packages/prompts). Empty -> auto-resolve:
+    # /app/prompts in the container, walk-up to packages/prompts in dev.
+    prompts_dir: str = ""
 
     # Secrets: default empty; access through `require()` when actually needed.
     meili_master_key: str = ""

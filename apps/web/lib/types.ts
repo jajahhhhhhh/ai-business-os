@@ -404,7 +404,13 @@ export interface WeeklyCompetitorReport {
 // Agents & automation
 // ---------------------------------------------------------------------------
 
-export type AgentRunStatus = "queued" | "running" | "succeeded" | "failed";
+export type AgentRunStatus =
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "parked"
+  | "over_budget";
 
 export interface AgentRun {
   id: string;
@@ -423,6 +429,57 @@ export interface AgentRun {
 export interface AgentRunListParams {
   agent?: string;
   status?: AgentRunStatus;
+  limit?: number;
+}
+
+/**
+ * GET /v1/agents/costs?days=7 — one row per agent × Bangkok day, ordered by
+ * agent then day. `budget_usd` is the daily cap (null = no cap configured).
+ */
+export interface AgentCost {
+  agent: string;
+  /** Bangkok-local day, "YYYY-MM-DD". */
+  day: string;
+  cost_usd: number;
+  tokens_in: number;
+  tokens_out: number;
+  runs: number;
+  budget_usd: number | null;
+}
+
+/** GET /v1/agents/evals — QA rubric scores per run, newest first. */
+export interface AgentEval {
+  id: string;
+  run_id: string;
+  agent: string;
+  rubric: string;
+  /** 0–100. */
+  score: number;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface AgentEvalListParams {
+  agent?: string;
+  limit?: number;
+}
+
+/**
+ * Task names accepted by POST /v1/agents/{name}:trigger — unknown names get a
+ * 404 problem+json from the API.
+ */
+export type AgentTaskName =
+  | "analytics-daily"
+  | "analytics-weekly"
+  | "planner"
+  | "memory-consolidate"
+  | "memory-capture"
+  | "qa-evaluate";
+
+/** POST /v1/agents/{name}:trigger → 202 accepted. */
+export interface TriggerResponse {
+  agent: string;
+  detail: string;
 }
 
 export interface Job {

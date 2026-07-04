@@ -124,12 +124,22 @@ class DailySnapshotUseCases:
         self._audit = audit
         self._line_push = line_push
 
-    async def generate(self, actor: str, now: datetime | None = None) -> SnapshotResult:
+    async def compose(self, now: datetime | None = None) -> tuple[str, str]:
+        """Deterministic gather + compose step: (body, period). No writes.
+
+        Split out in M4 so the analytics agent can enhance the draft between
+        composition and delivery; generate() keeps the M1 one-shot behavior.
+        """
         now = (now or datetime.now(BANGKOK_TZ)).astimezone(BANGKOK_TZ)
         today = now.date()
         sites = await self._repo.site_snapshots(week_start_bangkok(now), today)
-        body = compose_daily_snapshot(today, sites)
+        return compose_daily_snapshot(today, sites), today.isoformat()
 
+    async def deliver(
+        self, actor: str, body: str, *, period: str, now: datetime | None = None
+    ) -> SnapshotResult:
+        """Push to LINE (best-effort) then store + audit the report."""
+        now = (now or datetime.now(BANGKOK_TZ)).astimezone(BANGKOK_TZ)
         # LINE delivery must never fail report generation; the client already
         # swallows and logs transport errors, this guard is belt-and-braces.
         line_sent = False
@@ -141,7 +151,7 @@ class DailySnapshotUseCases:
 
         report = await self._repo.create_report(
             kind="daily",
-            period=today.isoformat(),
+            period=period,
             lang="th",
             body=body,
             sent_at=now if line_sent else None,
@@ -151,6 +161,11 @@ class DailySnapshotUseCases:
             "report.generated",
             "reports",
             report.id,
-            {"kind": "daily", "period": today.isoformat(), "line_sent": line_sent},
+            {"kind": "daily", "period": period, "line_sent": line_sent},
         )
         return SnapshotResult(report=report, line_sent=line_sent)
+
+    async def generate(self, actor: str, now: datetime | None = None) -> SnapshotResult:
+        now = (now or datetime.now(BANGKOK_TZ)).astimezone(BANGKOK_TZ)
+        body, period = await self.compose(now)
+        return await self.deliver(actor, body, period=period, now=now)

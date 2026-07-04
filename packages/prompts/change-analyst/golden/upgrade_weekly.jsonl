@@ -1,0 +1,1 @@
+{"input": {"draft": "รายงานคู่แข่งประจำสัปดาห์ 29 มิ.ย. 2569 - 5 ก.ค. 2569\n[Villa Aroon]\n- [สำคัญ] pricing: ลดราคา 20%"}, "expected_qualities": ["keeps_draft_facts", "has_header_บทวิเคราะห์", "has_header_3_สิ่งที่ควรทำ", "plain_text_no_markdown"]}

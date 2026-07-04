@@ -1,0 +1,1 @@
+{"input": {"kind": "daily", "body": "สรุปประจำวัน 4 ก.ค. 2569\n[Lipa Noi]\n- ยอดเบิกรอจ่าย: 1 รายการ รวม ฿50,000\nสิ่งสำคัญที่สุด: มียอดเบิกรอจ่าย 1 รายการ"}, "expected_qualities": ["json_only", "score_0_100_int", "notes_thai"]}
