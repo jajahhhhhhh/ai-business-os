@@ -10,6 +10,11 @@
 	# 	owner $2a$14$REPLACE_WITH_BCRYPT_HASH
 	# }
 
+	# Internal-only surface: Prometheus scrapes api:8000 on the docker
+	# network; the metrics endpoint is never served to the internet.
+	@internal_only path /api/v1/metrics
+	respond @internal_only 403
+
 	# API
 	handle_path /api/* {
 		reverse_proxy api:8000

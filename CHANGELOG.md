@@ -5,6 +5,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+### Added — Deployment readiness
+- Terraform module for the production VPS (Hetzner CPX31, Singapore, hardened
+  cloud-init: key-only SSH, UFW, fail2ban, Docker) + first-deploy runbook
+  covering DNS → secrets → seed → basic auth → smoke test → backups.
+- `scripts/gen-secrets.sh` (strong random production .env) and
+  `scripts/smoke.sh` (post-deploy verification incl. live snapshot generation);
+  `make seed / api-key / smoke`.
+- Interim prod auth (TD-5): `AUTH_MODE=proxy` trusts keyless requests as the
+  owner strictly behind Caddy basic_auth (boot warning; Bearer keys still
+  validated); `python -m src.create_api_key` mints scoped keys for MCP/automation.
+
+### Fixed — deploy blockers found in pre-deploy audit
+- Web client bundle baked `localhost:8000`: `NEXT_PUBLIC_API_URL` is now a
+  build arg (bake verified by inspecting built chunks).
+- GlitchTip pointed at a database Postgres never created (first-boot initdb
+  script added).
+- Prometheus metrics endpoint was publicly reachable through Caddy (now 403
+  from outside; scraped internally only).
+
 ### Added — M5 Lead discovery
 - Compliant lead sources: Reddit via the official API only (app-only OAuth,
   honest User-Agent, `skipped: no credentials` — never HTML scraping) and RSS

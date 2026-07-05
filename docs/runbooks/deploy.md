@@ -1,5 +1,9 @@
 # Runbook — Deploy
 
+> First time? Use [first-deploy.md](first-deploy.md) — it covers provisioning
+> (Terraform), secrets, seeding, basic auth, and the smoke test end-to-end.
+> This runbook covers ongoing deploys on an already-provisioned VPS.
+
 ## Prerequisites (one-time VPS setup)
 
 Ubuntu 24.04 LTS, 4 vCPU / 8 GB (Hetzner CPX31-class).

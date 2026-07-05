@@ -119,6 +119,10 @@ async def require_principal(
     authorization = request.headers.get("Authorization", "")
     scheme, _, token = authorization.partition(" ")
     if scheme.lower() != "bearer" or not token.strip():
+        if settings.auth_mode == "proxy":
+            # Keyless request trusted as the owner — valid ONLY behind Caddy
+            # basic_auth (config.auth_mode docstring; create_app warns at boot).
+            return Principal(actor="owner", scopes=("*",))
         raise _unauthorized("Missing bearer API key")
 
     stmt = sa.select(ApiKey).where(ApiKey.hash == hash_api_key(token.strip()))

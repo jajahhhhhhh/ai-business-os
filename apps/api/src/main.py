@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import structlog
 from fastapi import Depends, FastAPI
 
 from src.config import Settings, get_settings
@@ -60,6 +61,16 @@ def create_app(
     create_app never imports the orchestrator package."""
     settings = settings or get_settings()
     configure_logging(settings)
+
+    if settings.env == "prod" and settings.auth_mode == "proxy":
+        structlog.get_logger("api").warning(
+            "auth_mode_proxy",
+            detail=(
+                "Keyless requests are trusted as the owner. This is safe ONLY "
+                "behind Caddy basic_auth covering the whole site "
+                "(docs/runbooks/first-deploy.md step 7)."
+            ),
+        )
 
     app = FastAPI(
         title="AI Business OS API",

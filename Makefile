@@ -1,6 +1,6 @@
 COMPOSE := docker compose -f infra/compose/docker-compose.yml --env-file infra/compose/.env
 
-.PHONY: dev dev-down deploy api-dev web-dev test test-api test-web lint migrate backup
+.PHONY: dev dev-down deploy api-dev web-dev test test-api test-web lint migrate backup seed api-key smoke
 
 dev: ## Start data services only (develop api/web on host)
 	$(COMPOSE) --profile data up -d
@@ -34,3 +34,12 @@ lint:
 
 backup: ## Manual backup (also runs nightly via cron on VPS)
 	bash infra/backup/backup.sh
+
+seed: ## Owner user, sites, contractor, default lead sources (idempotent)
+	$(COMPOSE) run --rm api python -m src.seed
+
+api-key: ## Mint a scoped API key: make api-key NAME=mcp-kb
+	$(COMPOSE) run --rm api python -m src.create_api_key $(NAME)
+
+smoke: ## Post-deploy verification: make smoke DOMAIN=os.example.com
+	DOMAIN=$(DOMAIN) bash scripts/smoke.sh

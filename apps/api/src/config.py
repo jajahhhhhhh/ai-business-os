@@ -45,6 +45,14 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     version: str = "0.1.0"
 
+    # Interim auth model until Auth.js lands (TD-5):
+    # - 'apikey' (default): every non-dev request needs a Bearer key (api_keys).
+    # - 'proxy': keyless browser requests are trusted as the owner. ONLY valid
+    #   when the ENTIRE site sits behind Caddy basic_auth (single-owner VPS,
+    #   docs/runbooks/first-deploy.md step 7). Bearer keys are still validated
+    #   when presented (MCP servers, automation).
+    auth_mode: Literal["apikey", "proxy"] = "apikey"
+
     # Infrastructure endpoints (safe defaults for local docker-compose).
     database_url: str = "postgresql+asyncpg://osuser:ospass@localhost:5432/aibos"
     redis_url: str = "redis://localhost:6379/0"

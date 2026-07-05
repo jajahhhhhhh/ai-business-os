@@ -1,0 +1,47 @@
+#cloud-config
+# First-boot hardening + Docker install (ARCHITECTURE.md §14, §16).
+# After this completes (~2 min), the machine is ready for the first-deploy
+# runbook: docs/runbooks/first-deploy.md
+
+users:
+  - name: deploy
+    groups: [docker, sudo]
+    shell: /bin/bash
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    ssh_authorized_keys:
+      - ${ssh_public_key}
+
+package_update: true
+package_upgrade: true
+packages:
+  - docker.io
+  - docker-compose-v2
+  - fail2ban
+  - ufw
+  - git
+  - unattended-upgrades
+
+write_files:
+  - path: /etc/fail2ban/jail.local
+    content: |
+      [sshd]
+      enabled = true
+      maxretry = 5
+      bantime = 1h
+  - path: /etc/ssh/sshd_config.d/99-aibos.conf
+    content: |
+      PasswordAuthentication no
+      PermitRootLogin prohibit-password
+      KbdInteractiveAuthentication no
+
+runcmd:
+  - systemctl enable --now docker
+  - ufw default deny incoming
+  - ufw default allow outgoing
+  - ufw allow 22/tcp
+  - ufw allow 80/tcp
+  - ufw allow 443/tcp
+  - ufw --force enable
+  - systemctl enable --now fail2ban
+  - systemctl restart ssh
+  - mkdir -p /opt/aibos && chown deploy:deploy /opt/aibos

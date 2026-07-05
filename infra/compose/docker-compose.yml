@@ -24,6 +24,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-aibos}
     volumes:
       - pg_data:/var/lib/postgresql/data
+      # First-boot only: creates the glitchtip database (error tracking).
+      - ./initdb:/docker-entrypoint-initdb.d:ro
     ports:
       - "127.0.0.1:5432:5432"
     healthcheck:
@@ -135,11 +137,15 @@ services:
       redis: { condition: service_healthy }
 
   web:
-    build: { context: ../../apps/web }
+    build:
+      context: ../../apps/web
+      args:
+        # Baked into the client bundle at build time (see apps/web/Dockerfile).
+        NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:?set in .env (https://<domain>/api)}
     <<: [*restart, *logging]
     profiles: [prod]
     environment:
-      NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:-https://api.localhost}
+      NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL}
     expose: ["3000"]
 
   caddy:
