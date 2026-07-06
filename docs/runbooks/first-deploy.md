@@ -3,6 +3,25 @@
 Follow in order. Steps marked 💻 run on your Mac, 🖥 on the VPS.
 Estimated time: ~60–90 minutes, most of it waiting on DNS and image builds.
 
+## Fast path (one command)
+
+After you've done the three human-only prerequisites — (1) a Hetzner account
+with a payment method, (2) a Read/Write API token, (3) a domain whose DNS you
+control — you can skip the manual steps below and run:
+
+```bash
+HCLOUD_TOKEN=<token> DOMAIN=os.howtoniksen.com bash scripts/bootstrap.sh
+```
+
+It provisions the server, waits for hardening, copies the code up, generates
+secrets (and wires the DB password automatically), and brings the whole stack
+live — then prints the 3 short steps that must stay in your hands (password
+gate, optional API keys, final check). Safe to re-run. The manual walkthrough
+below is the fallback if you'd rather do it step by step or need to debug.
+
+---
+
+
 ## 0. Prerequisites (💻)
 
 - A domain (e.g. `os.howtoniksen.com`) whose DNS you control.
