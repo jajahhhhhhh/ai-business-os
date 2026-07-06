@@ -33,3 +33,14 @@ dist/
 # Data
 *.dump
 infra/compose/data/
+
+# Terraform — never commit the provider cache or state. State files can contain
+# secrets (the hcloud token, server details); the lock file IS committed to pin
+# provider versions.
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+crash.*.log
