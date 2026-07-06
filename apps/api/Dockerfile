@@ -60,7 +60,10 @@ FROM python:3.12-slim
 
 # tesseract-ocr(-tha) + poppler-utils: OCR and PDF rasterization binaries for
 # the M2 parsing pipeline (pytesseract / pdf2image call them at runtime).
+# upgrade first: fixed CVEs land in the debian security repo faster than
+# python:*-slim base-image rebuilds (keeps the trivy CI gate green honestly).
 RUN apt-get update \
+    && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends \
         curl tesseract-ocr tesseract-ocr-tha poppler-utils \
     && rm -rf /var/lib/apt/lists/*

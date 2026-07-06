@@ -29,6 +29,13 @@ ENV NODE_ENV=production \
     PORT=3000 \
     HOSTNAME=0.0.0.0
 
+# Patch OS packages (fixed CVEs land in Alpine faster than base-image tags)
+# and strip npm/corepack: the standalone server needs only `node`, and npm's
+# bundled deps are a recurring vulnerability-scan surface.
+RUN apk upgrade --no-cache \
+  && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
+            /usr/local/bin/corepack /opt/yarn*
+
 RUN addgroup --system --gid 1001 nodejs \
   && adduser --system --uid 1001 nextjs
 
