@@ -123,6 +123,11 @@ services:
       HF_HOME: /models
     volumes:
       - hf_models:/models
+    # The shared api image ships an HTTP healthcheck (curl /v1/health); a Celery
+    # worker serves no HTTP, so that check is meaningless here. Liveness is
+    # handled by `restart: unless-stopped`.
+    healthcheck:
+      disable: true
     depends_on:
       redis: { condition: service_healthy }
       migrate: { condition: service_completed_successfully }
@@ -131,8 +136,12 @@ services:
     build: { context: ../.., dockerfile: apps/api/Dockerfile }
     <<: [*restart, *logging]
     profiles: [prod]
-    command: ["celery", "-A", "src.worker", "beat", "--loglevel=INFO"]
+    # --schedule under /tmp: the app dir is root-owned/read-only to the non-root
+    # runtime user, so beat's schedule state file needs a writable location.
+    command: ["celery", "-A", "src.worker", "beat", "--loglevel=INFO", "--schedule", "/tmp/celerybeat-schedule"]
     env_file: .env
+    healthcheck:
+      disable: true # celery beat serves no HTTP; see worker note above
     depends_on:
       redis: { condition: service_healthy }
 

@@ -73,6 +73,11 @@ RUN useradd --create-home --uid 10001 apiuser
 WORKDIR /app
 COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder /app /app
+# COPY preserves source file modes. When the build context originates on a
+# filesystem without Unix permissions (e.g. ExFAT via rsync), files can arrive
+# mode 0700 owned by root and be unreadable to the non-root runtime user. Force
+# world-readable so the app can always read its own code/config.
+RUN chmod -R a+rX /app
 
 ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \

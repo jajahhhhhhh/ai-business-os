@@ -16,13 +16,18 @@ variable "ssh_allowed_cidrs" {
 }
 
 variable "server_type" {
-  description = "Hetzner server type (§16 baseline: 4 vCPU / 8 GB)."
+  # cpx32 = 4 vCPU / 8 GB / 160 GB (§16 baseline). The older cpx31 was retired
+  # by Hetzner for new orders; cpx32 is the current-generation equivalent.
+  description = "Hetzner server type (4 vCPU / 8 GB baseline)."
   type        = string
-  default     = "cpx31"
+  default     = "cpx32"
 }
 
 variable "location" {
-  description = "Hetzner location (sgp = Singapore, closest to Thailand)."
+  # nbg1 = Nuremberg, DE. Cheapest CPX tier (~€15/mo vs ~€38 in Singapore);
+  # latency to Thailand (~200ms) is irrelevant for a dashboard + cron jobs.
+  # Valid: fsn1, nbg1, hel1 (EU), ash, hil (US), sin (Singapore).
+  description = "Hetzner location code."
   type        = string
-  default     = "sgp"
+  default     = "nbg1"
 }

@@ -58,7 +58,11 @@ resource "hcloud_server" "aibos" {
     ssh_public_key = var.ssh_public_key
   })
 
-  backups = true # Hetzner-level image backups (+20% cost) on top of our B2 data backups
+  # Hetzner image backups (+20%) are OFF: the app runs its own nightly encrypted
+  # pg_dump + MinIO -> Backblaze B2 backups (docs/runbooks/restore.md), so paying
+  # for a second backup layer is redundant. Flip to true if you want image-level
+  # snapshots too.
+  backups = false
 
   lifecycle {
     prevent_destroy = true # the database lives here; destroy only deliberately
