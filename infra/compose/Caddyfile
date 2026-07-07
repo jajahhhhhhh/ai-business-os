@@ -4,33 +4,42 @@
 {$DOMAIN} {
 	encode zstd gzip
 
-	# Interim protection until Auth.js lands (TD-5, docs/runbooks/gmail-line-setup.md):
-	# uncomment and set a hash from `caddy hash-password` before public exposure.
-	# basic_auth {
-	# 	owner $2a$14$REPLACE_WITH_BCRYPT_HASH
-	# }
+	# route{} forces directives to run in written order (Caddy otherwise
+	# auto-sorts directives, which would let a terminal handle serve a request
+	# before basic_auth / the metrics 403 ran).
+	route {
+		# Password gate (interim, until Auth.js — TD-5, docs/runbooks/
+		# first-deploy.md step 7). MUST stay first inside route{} so it runs
+		# before any handler serves content. Activate by uncommenting and
+		# setting a real bcrypt hash from `caddy hash-password` (the
+		# first-deploy runbook does this automatically):
+		# basic_auth {
+		# 	owner <bcrypt-hash>
+		# }
 
-	# Internal-only surface: Prometheus scrapes api:8000 on the docker
-	# network; the metrics endpoint is never served to the internet.
-	@internal_only path /api/v1/metrics
-	respond @internal_only 403
+		# Internal-only: Prometheus scrapes api:8000 on the docker network;
+		# the metrics endpoint is never served to the internet. Must precede
+		# the /api proxy below.
+		@metrics path /api/v1/metrics
+		respond @metrics 403
 
-	# API
-	handle_path /api/* {
-		reverse_proxy api:8000
-	}
+		# API
+		handle_path /api/* {
+			reverse_proxy api:8000
+		}
 
-	# Observability (owner-only; protect further with basic_auth in prod)
-	handle_path /grafana/* {
-		reverse_proxy grafana:3000
-	}
-	handle_path /glitchtip/* {
-		reverse_proxy glitchtip:8080
-	}
+		# Observability (owner-only; protect further with basic_auth in prod)
+		handle_path /grafana/* {
+			reverse_proxy grafana:3000
+		}
+		handle_path /glitchtip/* {
+			reverse_proxy glitchtip:8080
+		}
 
-	# Dashboard
-	handle {
-		reverse_proxy web:3000
+		# Dashboard
+		handle {
+			reverse_proxy web:3000
+		}
 	}
 
 	header {
