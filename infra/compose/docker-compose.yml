@@ -111,6 +111,12 @@ services:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
       migrate: { condition: service_completed_successfully }
+      # KB backends: service_started (not healthy) preserves graceful
+      # degradation — the API boots even if these are slow, but they always
+      # come up with it so the knowledge base isn't silently unavailable.
+      minio: { condition: service_started }
+      qdrant: { condition: service_started }
+      meilisearch: { condition: service_started }
     expose: ["8000"]
 
   worker:
@@ -131,6 +137,10 @@ services:
     depends_on:
       redis: { condition: service_healthy }
       migrate: { condition: service_completed_successfully }
+      # KB ingestion (parse -> index) runs here; bring its backends up too.
+      minio: { condition: service_started }
+      qdrant: { condition: service_started }
+      meilisearch: { condition: service_started }
 
   beat:
     build: { context: ../.., dockerfile: apps/api/Dockerfile }

@@ -50,14 +50,28 @@ class MeilisearchKeywordIndex:
             await asyncio.sleep(_TASK_POLL_SECONDS)
 
     async def _ensure_settings(self, client: httpx.AsyncClient) -> None:
-        """Make document_id filterable (needed by delete_document).
+        """Create the index (explicit primary key) and make document_id
+        filterable. Idempotent, pushed once per process.
 
-        A settings update auto-creates the index; the primary key is inferred
-        from the `id` field on first document add. Idempotent, pushed once
-        per process.
+        The index is created with an EXPLICIT primaryKey='id': chunk records
+        carry both `id` and `document_id`, and Meilisearch primary-key
+        inference fails when it finds more than one `*id` field. Relying on
+        inference (or on a bare settings PATCH, which creates the index with
+        no key) leaves the index un-writable and every ingest fails.
         """
         if self._settings_pushed:
             return
+        # Create only if absent — POST on an existing index yields a task that
+        # fails with index_already_exists, which we'd otherwise treat as fatal.
+        exists = await client.get(f"/indexes/{INDEX_UID}")
+        if exists.status_code == 404:
+            created = await client.post(
+                "/indexes", json={"uid": INDEX_UID, "primaryKey": "id"}
+            )
+            created.raise_for_status()
+            await self._wait_for_task(client, created.json()["taskUid"])
+        elif exists.status_code >= 400:
+            exists.raise_for_status()
         response = await client.patch(
             f"/indexes/{INDEX_UID}/settings",
             json={"filterableAttributes": ["document_id"]},
@@ -88,6 +102,11 @@ class MeilisearchKeywordIndex:
 
     async def delete_document(self, document_id: uuid.UUID) -> None:
         async with self._client() as client:
+            # The pipeline deletes stale chunks before indexing new ones; on a
+            # fresh index the delete would otherwise be accepted (202) and then
+            # fail its task with index_not_found, killing ingestion. Ensure the
+            # index exists first.
+            await self._ensure_settings(client)
             response = await client.post(
                 f"/indexes/{INDEX_UID}/documents/delete",
                 json={"filter": f'document_id = "{document_id}"'},
