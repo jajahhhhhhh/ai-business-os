@@ -65,9 +65,7 @@ class MeilisearchKeywordIndex:
         # fails with index_already_exists, which we'd otherwise treat as fatal.
         exists = await client.get(f"/indexes/{INDEX_UID}")
         if exists.status_code == 404:
-            created = await client.post(
-                "/indexes", json={"uid": INDEX_UID, "primaryKey": "id"}
-            )
+            created = await client.post("/indexes", json={"uid": INDEX_UID, "primaryKey": "id"})
             created.raise_for_status()
             await self._wait_for_task(client, created.json()["taskUid"])
         elif exists.status_code >= 400:
