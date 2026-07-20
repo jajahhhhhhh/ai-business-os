@@ -138,6 +138,23 @@ celery_app.conf.beat_schedule = {
         "task": "src.worker.anonymize_stale_leads",
         "schedule": crontab(minute=45, hour=5, day_of_week="sun"),
     },
+    # M6 marketing pipeline (weekly, staggered so each stage's inputs exist):
+    # SEO brief Tue 09:00 -> content draft Wed 09:00 -> content calendar Thu 09:00.
+    "seo-brief-tue-0900": {
+        "task": "src.worker.run_agent_task",
+        "schedule": crontab(minute=0, hour=9, day_of_week="tue"),
+        "args": ("seo", "seo-brief"),
+    },
+    "content-draft-wed-0900": {
+        "task": "src.worker.run_agent_task",
+        "schedule": crontab(minute=0, hour=9, day_of_week="wed"),
+        "args": ("content", "content-draft"),
+    },
+    "content-calendar-thu-0900": {
+        "task": "src.worker.run_agent_task",
+        "schedule": crontab(minute=0, hour=9, day_of_week="thu"),
+        "args": ("social", "content-calendar"),
+    },
 }
 
 WORKER_ACTOR = "worker"

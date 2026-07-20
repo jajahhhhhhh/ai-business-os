@@ -36,6 +36,10 @@ TRIGGERS: dict[str, tuple[str, str]] = {
     "qa-evaluate": ("qa", "evaluate"),
     # M5: sweep every enabled lead source through the discovery pipeline.
     "customer-discovery": ("customer-discovery", "discover-all"),
+    # M6 marketing pipeline: seo brief -> content draft -> 4-week calendar.
+    "seo": ("seo", "seo-brief"),
+    "content": ("content", "content-draft"),
+    "social": ("social", "content-calendar"),
 }
 
 

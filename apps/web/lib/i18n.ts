@@ -299,12 +299,18 @@ export const AGENT_TASK_LABELS: Record<AgentTaskName, LocalizedText> = {
   "memory-consolidate": { th: "รวมความจำ", en: "Consolidate memory" },
   "memory-capture": { th: "เก็บสัญญาณคู่แข่ง", en: "Capture competitor signals" },
   "qa-evaluate": { th: "ตรวจคุณภาพ", en: "Run QA evaluation" },
+  seo: { th: "บรีฟ SEO", en: "SEO brief" },
+  content: { th: "ร่างคอนเทนต์", en: "Content draft" },
+  social: { th: "ปฏิทินคอนเทนต์", en: "Content calendar" },
 };
 
 export const REPORT_KIND_LABELS: Record<ReportKind, LocalizedText> = {
   daily: { th: "รายวัน", en: "Daily" },
   weekly: { th: "รายสัปดาห์", en: "Weekly" },
   monthly: { th: "รายเดือน", en: "Monthly" },
+  seo: { th: "บรีฟ SEO", en: "SEO brief" },
+  content: { th: "ร่างคอนเทนต์", en: "Content draft" },
+  "content-calendar": { th: "ปฏิทินคอนเทนต์", en: "Content calendar" },
 };
 
 /** Spend-category slugs → labels; exported for the quotation-form select. */

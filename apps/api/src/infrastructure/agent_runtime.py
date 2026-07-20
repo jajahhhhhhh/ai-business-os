@@ -45,18 +45,25 @@ from orchestrator.runner import Runner, RunRecord
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.application.agents.analytics import AnalyticsAgent
+from src.application.agents.content import ContentAgent
 from src.application.agents.customer_discovery import CustomerDiscoveryAgent
+from src.application.agents.marketing import KEYWORD_THEMES
 from src.application.agents.memory import MemoryAgent
 from src.application.agents.planner import PlannerAgent
 from src.application.agents.planning import CompetitorSignal, PlannerInputs
 from src.application.agents.ports import (
     ComposedReport,
+    ContentGap,
     DeliveredReport,
     EvalCandidate,
     LlmCompletion,
+    ReportRef,
+    SeoInputs,
     SignalEvent,
 )
 from src.application.agents.qa import QaAgent
+from src.application.agents.seo import SeoAgent
+from src.application.agents.social import SocialAgent
 from src.application.bank_transactions import MATCHED
 from src.application.competitor_intel import CompetitorIntelUseCases
 from src.application.lead_discovery import DiscoveryStats, LeadDiscoveryUseCases
@@ -102,9 +109,22 @@ _CENT4 = Decimal("0.0001")
 
 ESCALATION_MESSAGE_TH = "เอเจนต์ {name} ล้มเหลว: {reason} — งานถูกพักไว้"
 
-AGENT_NAMES = ("analytics", "planner", "memory", "qa", "customer-discovery")
+AGENT_NAMES = (
+    "analytics",
+    "planner",
+    "memory",
+    "qa",
+    "customer-discovery",
+    "seo",
+    "content",
+    "social",
+)
 
 HIGH_SEVERITIES = ("high", "critical")
+
+# M6: how far back the SEO agent looks for competitor content/promo moves.
+SEO_GAP_WINDOW_DAYS = 30
+SEO_GAP_LIMIT = 10
 
 
 # --------------------------------------------------------------- budget seam
@@ -656,6 +676,105 @@ class QaSqlGateway:
             await session.commit()
 
 
+class MarketingSqlGateway:
+    """MarketingGateway (M6) for the seo/content/social agent family.
+
+    One short-lived session per call. gather_seo_inputs seeds the evergreen
+    keyword themes and layers recent high/critical competitor content/promo
+    moves on top; recent_reports reads the pipeline's upstream artifacts
+    (kind='seo' briefs, kind='content' drafts); deliver writes the report row
+    plus an audit entry and optionally pushes a Thai calendar to LINE (same
+    shape as PlannerSqlGateway.deliver)."""
+
+    # Competitor change categories that read as content/marketing signals.
+    CONTENT_CATEGORIES = ("content", "promo", "seo")
+
+    def __init__(
+        self,
+        *,
+        maker: async_sessionmaker[AsyncSession],
+        line_push: Any | None,
+        actor: str,
+    ) -> None:
+        self._maker = maker
+        self._line_push = line_push
+        self._actor = actor
+
+    async def gather_seo_inputs(self) -> SeoInputs:
+        since = datetime.now(UTC) - timedelta(days=SEO_GAP_WINDOW_DAYS)
+        stmt = (
+            sa.select(ChangeEvent, Competitor.name.label("competitor_name"))
+            .join(Competitor, ChangeEvent.competitor_id == Competitor.id)
+            .where(
+                ChangeEvent.detected_at >= since,
+                ChangeEvent.severity.in_(HIGH_SEVERITIES),
+                ChangeEvent.category.in_(self.CONTENT_CATEGORIES),
+            )
+            .order_by(ChangeEvent.detected_at.desc())
+            .limit(SEO_GAP_LIMIT)
+        )
+        async with self._maker() as session:
+            rows = (await session.execute(stmt)).all()
+        gaps = tuple(
+            ContentGap(
+                competitor_name=row.competitor_name,
+                summary=row.ChangeEvent.summary,
+                category=row.ChangeEvent.category,
+            )
+            for row in rows
+        )
+        return SeoInputs(keyword_themes=KEYWORD_THEMES, content_gaps=gaps)
+
+    async def recent_reports(self, kind: str, limit: int) -> list[ReportRef]:
+        stmt = (
+            sa.select(Report)
+            .where(Report.kind == kind)
+            .order_by(Report.created_at.desc())
+            .limit(limit)
+        )
+        async with self._maker() as session:
+            rows = (await session.execute(stmt)).scalars().all()
+        return [
+            ReportRef(
+                report_id=row.id,
+                period=row.period,
+                body=row.body or "",
+                created_at=row.created_at,
+            )
+            for row in rows
+        ]
+
+    async def deliver(
+        self, *, kind: str, period: str, body: str, lang: str, line: bool
+    ) -> DeliveredReport:
+        now = datetime.now(BANGKOK_TZ)
+        line_sent = False
+        if line and self._line_push is not None:
+            try:
+                line_sent = await self._line_push(body)
+            except Exception:  # noqa: BLE001 - push failure is non-fatal by design
+                line_sent = False
+        async with self._maker() as session:
+            report = Report(
+                kind=kind,
+                period=period,
+                lang=lang,
+                body=body,
+                sent_at=now if line_sent else None,
+            )
+            session.add(report)
+            await session.flush()
+            await SqlAuditWriter(session).write(
+                self._actor,
+                "report.generated",
+                "reports",
+                report.id,
+                {"kind": kind, "period": period, "line_sent": line_sent},
+            )
+            await session.commit()
+        return _delivered(report, line_sent, body)
+
+
 # ------------------------------------------------------------------- runtime
 
 
@@ -748,6 +867,15 @@ def build_agent(
             actor=actor,
         )
         return CustomerDiscoveryAgent(lead_gateway, runtime.llm, daily_budget_usd=cap)
+    if agent_name in ("seo", "content", "social"):
+        marketing_gateway = MarketingSqlGateway(
+            maker=maker, line_push=runtime.line_push, actor=actor
+        )
+        if agent_name == "seo":
+            return SeoAgent(marketing_gateway, runtime.llm, daily_budget_usd=cap)
+        if agent_name == "content":
+            return ContentAgent(marketing_gateway, runtime.llm, daily_budget_usd=cap)
+        return SocialAgent(marketing_gateway, daily_budget_usd=cap)
     raise ValueError(f"unknown agent {agent_name!r}")
 
 

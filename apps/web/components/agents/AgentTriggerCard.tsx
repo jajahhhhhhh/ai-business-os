@@ -20,6 +20,9 @@ const TASKS: AgentTaskName[] = [
   "memory-consolidate",
   "memory-capture",
   "qa-evaluate",
+  "seo",
+  "content",
+  "social",
 ];
 
 /**

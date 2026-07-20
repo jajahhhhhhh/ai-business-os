@@ -21,6 +21,12 @@ def _default_agent_budgets() -> dict[str, Decimal]:
         # M5: lead discovery classification runs on the LOW tier in ≤10-item
         # batches; $0.50/day covers hundreds of classified posts.
         "customer-discovery": Decimal("0.50"),
+        # M6 marketing: SEO brief (MID) + content draft (HIGH) are one LLM call
+        # each per run; social calendar is deterministic (no LLM, $0 needed but
+        # a nonzero cap so the agent is allowed to run).
+        "seo": Decimal("0.50"),
+        "content": Decimal("1.00"),
+        "social": Decimal("0.10"),
     }
 
 
