@@ -5,6 +5,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+### Added — M6 Marketing (Content & SEO)
+- Three budget-capped agents forming a content pipeline over the `reports`
+  table, each additive-LLM with a deterministic fallback (a brief/draft/calendar
+  is always produced): **SEO** (tier MID, `seo-brief`) seeds evergreen Koh Samui
+  keyword themes and layers recent high/critical competitor content/promo moves
+  into an English brief (`kind='seo'`); **Content** (tier HIGH, `content-draft`)
+  drafts English marketing copy + a Thai owner summary from the latest briefs
+  (`kind='content'`, a draft for approval); **Social** (tier LOW,
+  `content-calendar`, deterministic) spreads recent drafts across a 4-week
+  calendar (`kind='content-calendar'`) and pushes it to LINE for approval — the
+  M6 gate deliverable.
+- Weekly beat schedule (SEO Tue 09:00 → Content Wed 09:00 → Calendar Thu 09:00),
+  manual triggers (`POST /v1/agents/{seo,content,social}:trigger`), dispatchable
+  jobs, and dashboard trigger buttons; per-agent daily caps in `AGENT_BUDGETS`.
+- Brand guide + versioned prompt templates (`packages/prompts/{seo,content}`).
+  Postiz/Ahrefs stay MCPs consumed as-is (§7) — the backend produces the
+  briefs/calendar; publishing is not re-wrapped in the API.
+
 ### Added — Deployment readiness
 - Terraform module for the production VPS (Hetzner CPX31, Singapore, hardened
   cloud-init: key-only SSH, UFW, fail2ban, Docker) + first-deploy runbook

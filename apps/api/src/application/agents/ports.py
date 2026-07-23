@@ -131,6 +131,53 @@ class QaGateway(Protocol):
     ) -> None: ...
 
 
+@dataclass(frozen=True, slots=True)
+class ContentGap:
+    """A competitor content/promo move the SEO agent should react to."""
+
+    competitor_name: str
+    summary: str
+    category: str
+
+
+@dataclass(frozen=True, slots=True)
+class SeoInputs:
+    """Everything the SEO agent reads (gathered by the MarketingGateway)."""
+
+    keyword_themes: tuple[str, ...] = ()
+    content_gaps: tuple[ContentGap, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ReportRef:
+    """A previously-delivered marketing report (SEO brief / content draft)."""
+
+    report_id: uuid.UUID
+    period: str | None
+    body: str
+    created_at: datetime
+
+
+class MarketingGateway(Protocol):
+    """M6 shared data seam for the seo/content/social agent family.
+
+    The three agents form a pipeline over the reports table: SEO writes
+    kind='seo' briefs, Content reads those briefs and writes kind='content'
+    drafts, Social reads the drafts and writes the kind='content-calendar'
+    schedule. deliver() is the one write path (report row + audit + optional
+    LINE push), mirroring the M4 gateways."""
+
+    async def gather_seo_inputs(self) -> SeoInputs: ...
+
+    async def recent_reports(self, kind: str, limit: int) -> list[ReportRef]:
+        """Latest reports of a kind, newest first (upstream pipeline inputs)."""
+        ...
+
+    async def deliver(
+        self, *, kind: str, period: str, body: str, lang: str, line: bool
+    ) -> DeliveredReport: ...
+
+
 class CustomerDiscoveryGateway(Protocol):
     """M5 lead discovery over LeadDiscoveryUseCases.
 

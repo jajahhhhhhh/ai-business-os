@@ -18,8 +18,15 @@ def test_trigger_names_route_to_the_right_agent_and_task() -> None:
     assert resolve_trigger("qa-evaluate") == ("qa", "evaluate")
 
 
+def test_marketing_trigger_names_route_to_the_right_agent_and_task() -> None:
+    assert resolve_trigger("seo") == ("seo", "seo-brief")
+    assert resolve_trigger("content") == ("content", "content-draft")
+    assert resolve_trigger("social") == ("social", "content-calendar")
+
+
 def test_trigger_registry_matches_the_web_contract_exactly() -> None:
-    # apps/web/lib/types.ts AgentTaskName — keep in lockstep.
+    # apps/web/lib/types.ts AgentTaskName — keep in lockstep. (customer-discovery
+    # is API-triggerable but not surfaced as a web button.)
     assert set(TRIGGERS) == {
         "analytics-daily",
         "analytics-weekly",
@@ -28,6 +35,9 @@ def test_trigger_registry_matches_the_web_contract_exactly() -> None:
         "memory-capture",
         "qa-evaluate",
         "customer-discovery",
+        "seo",
+        "content",
+        "social",
     }
 
 
@@ -54,3 +64,13 @@ def test_dispatchable_registry_covers_agent_jobs_with_args() -> None:
         ("planner", "weekly-plan"),
     )
     assert DISPATCHABLE["qa_evaluate"] == ("src.worker.run_agent_task", ("qa", "evaluate"))
+    # M6 marketing pipeline jobs.
+    assert DISPATCHABLE["seo_brief"] == ("src.worker.run_agent_task", ("seo", "seo-brief"))
+    assert DISPATCHABLE["content_draft"] == (
+        "src.worker.run_agent_task",
+        ("content", "content-draft"),
+    )
+    assert DISPATCHABLE["content_calendar"] == (
+        "src.worker.run_agent_task",
+        ("social", "content-calendar"),
+    )

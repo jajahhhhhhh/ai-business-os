@@ -491,6 +491,8 @@ from src.application.agents.ports import (  # noqa: E402
     DeliveredReport,
     EvalCandidate,
     LlmCompletion,
+    ReportRef,
+    SeoInputs,
     SignalEvent,
 )
 
@@ -663,6 +665,51 @@ class FakeQaGateway:
 
     async def write_eval(self, *, run_id: uuid.UUID, rubric: str, score: int, notes: str) -> None:
         self.evals.append({"run_id": run_id, "rubric": rubric, "score": score, "notes": notes})
+
+
+class FakeMarketingGateway:
+    """MarketingGateway (M6) over plain lists: SEO inputs, upstream reports by
+    kind, and recorded deliveries."""
+
+    def __init__(
+        self,
+        *,
+        seo_inputs: SeoInputs | None = None,
+        reports: dict[str, list[ReportRef]] | None = None,
+    ) -> None:
+        self.seo_inputs = seo_inputs or SeoInputs()
+        self.reports = {kind: list(refs) for kind, refs in (reports or {}).items()}
+        self.delivered: list[DeliveredReport] = []
+
+    async def gather_seo_inputs(self) -> SeoInputs:
+        return self.seo_inputs
+
+    async def recent_reports(self, kind: str, limit: int) -> list[ReportRef]:
+        return list(self.reports.get(kind, []))[:limit]
+
+    async def deliver(
+        self, *, kind: str, period: str, body: str, lang: str, line: bool
+    ) -> DeliveredReport:
+        record = DeliveredReport(
+            report_id=uuid.uuid4(),
+            kind=kind,
+            period=period,
+            lang=lang,
+            body=body,
+            line_sent=line,
+            created_at=datetime.now(UTC),
+        )
+        self.delivered.append(record)
+        return record
+
+
+def make_report_ref(body: str, *, period: str | None = None) -> ReportRef:
+    return ReportRef(
+        report_id=uuid.uuid4(),
+        period=period,
+        body=body,
+        created_at=datetime.now(UTC),
+    )
 
 
 # ---------------------------------------------------------- M5: lead discovery

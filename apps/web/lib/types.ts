@@ -569,7 +569,10 @@ export type AgentTaskName =
   | "planner"
   | "memory-consolidate"
   | "memory-capture"
-  | "qa-evaluate";
+  | "qa-evaluate"
+  | "seo"
+  | "content"
+  | "social";
 
 /** POST /v1/agents/{name}:trigger → 202 accepted. */
 export interface TriggerResponse {
@@ -586,7 +589,13 @@ export interface Job {
   last_status: "success" | "failed" | null;
 }
 
-export type ReportKind = "daily" | "weekly" | "monthly";
+export type ReportKind =
+  | "daily"
+  | "weekly"
+  | "monthly"
+  | "seo"
+  | "content"
+  | "content-calendar";
 
 export interface Report {
   id: string;

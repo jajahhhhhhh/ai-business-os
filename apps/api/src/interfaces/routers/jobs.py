@@ -36,6 +36,10 @@ DISPATCHABLE: dict[str, tuple[str, tuple[str, ...]]] = {
     "collect_all_lead_sources": ("src.worker.collect_all_lead_sources", ()),
     "cluster_leads": ("src.worker.cluster_leads", ()),
     "anonymize_stale_leads": ("src.worker.anonymize_stale_leads", ()),
+    # M6 marketing pipeline jobs (generic runner with (agent, task_kind) args).
+    "seo_brief": ("src.worker.run_agent_task", ("seo", "seo-brief")),
+    "content_draft": ("src.worker.run_agent_task", ("content", "content-draft")),
+    "content_calendar": ("src.worker.run_agent_task", ("social", "content-calendar")),
 }
 
 
