@@ -118,6 +118,32 @@ def _first_line(body: str, *, strip_headers: tuple[str, ...] = ()) -> str:
     return ""
 
 
+def _first_keyword(brief_body: str) -> str:
+    """First target keyword from an SEO brief, else the top brand theme.
+
+    The brief lists keywords as '- <kw>' bullets under a 'Target keywords:'
+    label (see compose_seo_brief_fallback / the seo_brief prompt). Pick that
+    keyword so the content title is a real topic — NOT the brief's 'Site:'
+    metadata line, which the old first-non-header-line heuristic grabbed."""
+    bullets: list[str] = []
+    in_keywords = False
+    for raw in brief_body.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line.lower().startswith("target keyword"):
+            in_keywords = True
+            continue
+        if line.startswith("-"):
+            keyword = line.lstrip("-").strip()
+            if in_keywords:
+                return keyword
+            bullets.append(keyword)
+        elif in_keywords:  # left the keyword block without an earlier return
+            in_keywords = False
+    return bullets[0] if bullets else KEYWORD_THEMES[0]
+
+
 def format_briefs(briefs: list[ReportRef]) -> str:
     """Render recent SEO briefs as context for the content-draft prompt."""
     if not briefs:
@@ -132,8 +158,8 @@ def compose_content_fallback(period: str, briefs: list[ReportRef]) -> str:
     """Deterministic English draft + Thai summary when the LLM is unavailable.
 
     A skeleton the owner can flesh out — never a fabricated finished post."""
-    topic = _first_line(briefs[0].body, strip_headers=(SEO_HEADER,)) if briefs else ""
-    theme = topic or KEYWORD_THEMES[0].title()
+    keyword = _first_keyword(briefs[0].body) if briefs else KEYWORD_THEMES[0]
+    theme = keyword.title()
     lines = [
         f"{CONTENT_HEADER} — {period}",
         f"Working title: {theme} at {BRAND_NAME}",
