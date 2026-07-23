@@ -16,6 +16,7 @@ from src.application.agents.marketing import (
     THAI_SUMMARY_HEADER,
     WEEKLY_SLOTS,
     _draft_title,
+    _first_keyword,
     _week_start,
     compose_content_calendar,
     compose_content_fallback,
@@ -65,6 +66,33 @@ def test_content_fallback_has_header_and_thai_summary() -> None:
 
 def test_format_briefs_without_input_is_safe() -> None:
     assert "No SEO brief" in format_briefs([])
+
+
+REALISTIC_BRIEF = (
+    f"{SEO_HEADER} — 2026-W30\n"
+    "Site: howtoniksen.com (How to Niksen, Koh Samui)\n\n"
+    "Target keywords:\n"
+    "- private pool villa koh samui\n"
+    "- boutique villa koh samui\n"
+)
+
+
+def test_first_keyword_picks_the_keyword_not_metadata() -> None:
+    assert _first_keyword(REALISTIC_BRIEF) == "private pool villa koh samui"
+
+
+def test_first_keyword_falls_back_to_theme_without_keyword_section() -> None:
+    assert _first_keyword(f"{SEO_HEADER} — 2026-W30\nSite: x") == KEYWORD_THEMES[0]
+
+
+def test_content_fallback_title_is_a_keyword_not_brief_metadata() -> None:
+    # Regression: the fallback used to grab the brief's "Site:" line as the
+    # working title (howtoniksen.com …), which then propagated into the calendar.
+    brief = make_report_ref(REALISTIC_BRIEF)
+    body = compose_content_fallback("2026-W30", [brief])
+    title_line = body.splitlines()[1]
+    assert title_line == "Working title: Private Pool Villa Koh Samui at How to Niksen"
+    assert "Site:" not in title_line and "howtoniksen.com" not in body
 
 
 # ------------------------------------------------------------ social calendar
