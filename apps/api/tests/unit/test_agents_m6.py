@@ -147,9 +147,28 @@ async def test_social_builds_calendar_from_drafts_and_pushes_to_line() -> None:
     agent = SocialAgent(gateway, daily_budget_usd=BUDGET)
     outputs = await _run_steps(agent, Task(kind="content-calendar", payload={}))
 
-    assert outputs[0].output == {"drafts": 1}
+    assert outputs[0].output == {"drafts": 1, "briefs": 0}
     [delivered] = gateway.delivered
     assert delivered.kind == "content-calendar" and delivered.lang == "th"
     assert delivered.body.startswith(CALENDAR_HEADER_TH)
     assert "Slow Sundays" in delivered.body
     assert delivered.line_sent is True  # owner gets the calendar to approve
+
+
+async def test_social_tops_up_variety_from_the_seo_brief() -> None:
+    draft = make_report_ref(f"{CONTENT_HEADER} — 2026-W30\nWorking title: Slow Sundays")
+    brief = make_report_ref(
+        f"{SEO_HEADER} — 2026-W30\nTarget keywords:\n"
+        "- private pool villa koh samui\n- wellness retreat koh samui\n"
+    )
+    gateway = FakeMarketingGateway(reports={"content": [draft], "seo": [brief]})
+    agent = SocialAgent(gateway, daily_budget_usd=BUDGET)
+    outputs = await _run_steps(agent, Task(kind="content-calendar", payload={}))
+
+    assert outputs[0].output == {"drafts": 1, "briefs": 1}
+    assert outputs[1].output["distinct_titles"] == 3  # 1 draft + 2 keyword topics
+    [delivered] = gateway.delivered
+    assert "Slow Sundays" in delivered.body  # real draft scheduled
+    assert "Private Pool Villa Koh Samui (planned topic)" in delivered.body
+    slot_lines = [ln for ln in delivered.body.splitlines() if ln.startswith("สัปดาห์")]
+    assert len({ln.split(": ", 1)[1] for ln in slot_lines}) == 3  # varied, not repeated

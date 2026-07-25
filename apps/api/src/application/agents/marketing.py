@@ -61,6 +61,10 @@ WEEKLY_SLOTS: tuple[tuple[str, str], ...] = (
     ("Wed", "Facebook"),
     ("Fri", "Blog"),
 )
+CALENDAR_SLOTS = CALENDAR_WEEKS * len(WEEKLY_SLOTS)  # 12 posts across the window
+# Slots not backed by a real draft are filled with distinct SEO keyword topics,
+# tagged so the owner can see which still need drafting.
+PLANNED_TOPIC_SUFFIX = " (planned topic)"
 
 
 # --------------------------------------------------------------------- SEO
@@ -118,14 +122,16 @@ def _first_line(body: str, *, strip_headers: tuple[str, ...] = ()) -> str:
     return ""
 
 
-def _first_keyword(brief_body: str) -> str:
-    """First target keyword from an SEO brief, else the top brand theme.
+def _brief_keywords(brief_body: str) -> list[str]:
+    """Target keywords from an SEO brief, in order.
 
-    The brief lists keywords as '- <kw>' bullets under a 'Target keywords:'
-    label (see compose_seo_brief_fallback / the seo_brief prompt). Pick that
-    keyword so the content title is a real topic — NOT the brief's 'Site:'
-    metadata line, which the old first-non-header-line heuristic grabbed."""
-    bullets: list[str] = []
+    The brief lists them as '- <kw>' bullets under a 'Target keywords:' label
+    (see compose_seo_brief_fallback / the seo_brief prompt). Returns those
+    bullets; if the labelled block is absent, falls back to any bullets found
+    (e.g. the 'Suggested pieces' list) so the caller still has topics to work
+    with. NEVER returns the brief's 'Site:' metadata line."""
+    keywords: list[str] = []
+    other_bullets: list[str] = []
     in_keywords = False
     for raw in brief_body.splitlines():
         line = raw.strip()
@@ -135,13 +141,20 @@ def _first_keyword(brief_body: str) -> str:
             in_keywords = True
             continue
         if line.startswith("-"):
-            keyword = line.lstrip("-").strip()
-            if in_keywords:
-                return keyword
-            bullets.append(keyword)
-        elif in_keywords:  # left the keyword block without an earlier return
+            bullet = line.lstrip("-").strip()
+            (keywords if in_keywords else other_bullets).append(bullet)
+        elif in_keywords:  # a non-bullet line ends the keyword block
             in_keywords = False
-    return bullets[0] if bullets else KEYWORD_THEMES[0]
+    return keywords or other_bullets
+
+
+def _first_keyword(brief_body: str) -> str:
+    """First target keyword from an SEO brief, else the top brand theme.
+
+    Used as the content-draft title so it's a real topic — NOT the brief's
+    'Site:' metadata line, which the old first-non-header-line heuristic grabbed."""
+    keywords = _brief_keywords(brief_body)
+    return keywords[0] if keywords else KEYWORD_THEMES[0]
 
 
 def format_briefs(briefs: list[ReportRef]) -> str:
@@ -198,16 +211,37 @@ def _draft_title(draft: ReportRef) -> str:
     return title or "Untitled draft"
 
 
-def schedule_calendar(drafts: list[ReportRef]) -> list[CalendarSlot]:
-    """Spread available drafts across CALENDAR_WEEKS × WEEKLY_SLOTS, cycling
-    titles when there are fewer drafts than slots. Deterministic (no clock)."""
-    titles = [_draft_title(draft) for draft in drafts] or ["(placeholder — no draft yet)"]
+def build_title_pool(drafts: list[ReportRef], brief_body: str = "") -> list[str]:
+    """Distinct slot titles: every real draft first (deduped, in order), then
+    distinct SEO keyword topics from the brief to fill out the variety.
+
+    Real, approved content always takes precedence; the planned topics only
+    diversify the slots a thin draft backlog would otherwise leave repeating."""
+    pool: list[str] = []
+    for draft in drafts:
+        title = _draft_title(draft)
+        if title and title not in pool:
+            pool.append(title)
+    for keyword in _brief_keywords(brief_body):
+        titled = keyword.title()
+        # Skip a keyword a real draft already covers (its title contains the
+        # phrase) so the plan doesn't list the same topic twice.
+        if any(titled in existing for existing in pool):
+            continue
+        pool.append(f"{titled}{PLANNED_TOPIC_SUFFIX}")
+    return pool
+
+
+def schedule_calendar(titles: list[str]) -> list[CalendarSlot]:
+    """Spread a title pool across CALENDAR_WEEKS × WEEKLY_SLOTS, cycling only
+    when the pool is smaller than the slot count. Deterministic (no clock)."""
+    pool = titles or ["(placeholder — no draft yet)"]
     slots: list[CalendarSlot] = []
     index = 0
     for week in range(1, CALENDAR_WEEKS + 1):
         for day, channel in WEEKLY_SLOTS:
             slots.append(
-                CalendarSlot(week=week, day=day, channel=channel, title=titles[index % len(titles)])
+                CalendarSlot(week=week, day=day, channel=channel, title=pool[index % len(pool)])
             )
             index += 1
     return slots
@@ -220,8 +254,8 @@ def _week_start(reference: date) -> date:
     return reference + timedelta(days=days_ahead)
 
 
-def compose_content_calendar(reference: date, drafts: list[ReportRef]) -> tuple[str, str]:
-    """Build the Thai 4-week calendar body and its ISO period label.
+def render_calendar(reference: date, titles: list[str], *, had_drafts: bool) -> tuple[str, str]:
+    """Render the Thai 4-week calendar from a prepared title pool.
 
     Returns (body, period). period is 'YYYY-MM-DD..YYYY-MM-DD' (the 4-week
     window). The body is LINE-friendly plain text: Thai framing, English
@@ -230,15 +264,23 @@ def compose_content_calendar(reference: date, drafts: list[ReportRef]) -> tuple[
     end = start + timedelta(days=CALENDAR_WEEKS * 7 - 1)
     period = f"{start.isoformat()}..{end.isoformat()}"
     lines = [f"{CALENDAR_HEADER_TH} ({start.isoformat()} – {end.isoformat()})"]
-    if not drafts:
+    if not had_drafts:
         lines.append(NO_DRAFTS_LINE_TH)
-    for slot in schedule_calendar(drafts):
+    for slot in schedule_calendar(titles):
         slot_date = start + timedelta(days=(slot.week - 1) * 7 + _weekday_offset(slot.day))
         lines.append(
             f"สัปดาห์ {slot.week} · {slot_date.isoformat()} ({slot.day}) · "
             f"{slot.channel}: {slot.title}"
         )
     return "\n".join(lines), period
+
+
+def compose_content_calendar(
+    reference: date, drafts: list[ReportRef], brief_body: str = ""
+) -> tuple[str, str]:
+    """Convenience wrapper: build the pool from drafts + brief, then render."""
+    pool = build_title_pool(drafts, brief_body)
+    return render_calendar(reference, pool, had_drafts=bool(drafts))
 
 
 _WEEKDAY_OFFSETS = {"Mon": 0, "Tue": 1, "Wed": 2, "Thu": 3, "Fri": 4, "Sat": 5, "Sun": 6}

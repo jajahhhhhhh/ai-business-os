@@ -8,16 +8,17 @@ from datetime import date
 from src.application.agents.marketing import (
     BRAND_NAME,
     CALENDAR_HEADER_TH,
+    CALENDAR_SLOTS,
     CALENDAR_WEEKS,
     CONTENT_HEADER,
     KEYWORD_THEMES,
     NO_DRAFTS_LINE_TH,
     SEO_HEADER,
     THAI_SUMMARY_HEADER,
-    WEEKLY_SLOTS,
     _draft_title,
     _first_keyword,
     _week_start,
+    build_title_pool,
     compose_content_calendar,
     compose_content_fallback,
     compose_seo_brief_fallback,
@@ -113,15 +114,47 @@ def test_week_start_is_always_the_following_monday() -> None:
 
 
 def test_schedule_calendar_fills_every_slot_and_cycles_titles() -> None:
-    drafts = [
-        make_report_ref(f"{CONTENT_HEADER} — x\nWorking title: A"),
-        make_report_ref(f"{CONTENT_HEADER} — x\nWorking title: B"),
-    ]
-    slots = schedule_calendar(drafts)
-    assert len(slots) == CALENDAR_WEEKS * len(WEEKLY_SLOTS)
+    slots = schedule_calendar(["A", "B"])
+    assert len(slots) == CALENDAR_SLOTS
     assert {s.week for s in slots} == set(range(1, CALENDAR_WEEKS + 1))
     assert [s.channel for s in slots[:3]] == ["Instagram", "Facebook", "Blog"]
     assert {s.title for s in slots} == {"A", "B"}  # titles cycle
+
+
+def test_build_title_pool_dedupes_drafts_then_adds_planned_topics() -> None:
+    drafts = [
+        make_report_ref(f"{CONTENT_HEADER} — x\nWorking title: A"),
+        make_report_ref(f"{CONTENT_HEADER} — x\nWorking title: A"),  # duplicate
+        make_report_ref(f"{CONTENT_HEADER} — x\nWorking title: B"),
+    ]
+    pool = build_title_pool(drafts, REALISTIC_BRIEF)
+    # Real drafts first (deduped), then distinct keyword topics tagged as planned.
+    assert pool[:2] == ["A", "B"]
+    assert "Private Pool Villa Koh Samui (planned topic)" in pool
+    assert "Boutique Villa Koh Samui (planned topic)" in pool
+    assert len(pool) == len(set(pool))  # all distinct
+
+
+def test_build_title_pool_skips_topic_already_covered_by_a_draft() -> None:
+    # A draft written from a keyword shouldn't also appear as a planned topic.
+    draft = make_report_ref(
+        f"{CONTENT_HEADER} — x\nWorking title: Private Pool Villa Koh Samui at How to Niksen"
+    )
+    pool = build_title_pool([draft], REALISTIC_BRIEF)
+    assert "Private Pool Villa Koh Samui (planned topic)" not in pool
+    assert "Boutique Villa Koh Samui (planned topic)" in pool  # a distinct topic stays
+
+
+def test_calendar_has_variety_from_one_draft_plus_brief() -> None:
+    # The exact bug the user hit: one draft used to fill all 12 slots identically.
+    draft = make_report_ref(f"{CONTENT_HEADER} — x\nWorking title: Slow Sundays")
+    brief = make_report_ref(REALISTIC_BRIEF)
+    body, _ = compose_content_calendar(date(2026, 7, 20), [draft], brief.body)
+    assert "Slow Sundays" in body  # the real draft is scheduled
+    assert "Private Pool Villa Koh Samui (planned topic)" in body  # + planned variety
+    # Distinct titles across the 12 slots (not one repeated title).
+    slot_lines = [ln for ln in body.splitlines() if ln.startswith("สัปดาห์")]
+    assert len({ln.split(": ", 1)[1] for ln in slot_lines}) >= 3
 
 
 def test_content_calendar_body_and_period() -> None:
