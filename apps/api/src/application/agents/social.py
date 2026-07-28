@@ -26,7 +26,11 @@ from orchestrator.contract import (
     Task,
 )
 
-from src.application.agents.marketing import compose_content_calendar
+from src.application.agents.marketing import (
+    CALENDAR_SLOTS,
+    build_title_pool,
+    render_calendar,
+)
 from src.application.agents.ports import MarketingGateway, ReportRef
 from src.domain.bank_alerts import BANGKOK_TZ
 
@@ -40,6 +44,7 @@ STEP_DELIVER = "deliver"
 
 REPORT_KIND = "content-calendar"
 DRAFTS_LIMIT = 12  # enough to fill 4 weeks × 3 slots without repeating
+BRIEFS_LIMIT = 2  # recent SEO briefs whose keywords top up calendar variety
 
 
 class SocialAgent:
@@ -51,6 +56,7 @@ class SocialAgent:
         self.daily_budget_usd = daily_budget_usd
         # Per-run state (a fresh agent instance is built for every run).
         self._drafts: list[ReportRef] = []
+        self._briefs: list[ReportRef] = []
         self._body = ""
         self._period = ""
 
@@ -63,11 +69,30 @@ class SocialAgent:
         try:
             if step.name == STEP_GATHER:
                 self._drafts = await self._gateway.recent_reports("content", DRAFTS_LIMIT)
-                return StepResult(step=step, output={"drafts": len(self._drafts)})
+                self._briefs = await self._gateway.recent_reports("seo", BRIEFS_LIMIT)
+                return StepResult(
+                    step=step,
+                    output={"drafts": len(self._drafts), "briefs": len(self._briefs)},
+                )
             if step.name == STEP_SCHEDULE:
                 reference = datetime.now(BANGKOK_TZ).date()
-                self._body, self._period = compose_content_calendar(reference, self._drafts)
-                return StepResult(step=step, output={"period": self._period})
+                brief_body = self._briefs[0].body if self._briefs else ""
+                pool = build_title_pool(self._drafts, brief_body)
+                if len(pool) < CALENDAR_SLOTS:
+                    # No silent repetition: flag a thin backlog so the owner
+                    # knows some slots reuse a title (more drafts/keywords fix it).
+                    logger.info(
+                        "content_calendar_thin_backlog",
+                        distinct_titles=len(pool),
+                        slots=CALENDAR_SLOTS,
+                    )
+                self._body, self._period = render_calendar(
+                    reference, pool, had_drafts=bool(self._drafts)
+                )
+                return StepResult(
+                    step=step,
+                    output={"period": self._period, "distinct_titles": len(pool)},
+                )
             if step.name == STEP_DELIVER:
                 delivered = await self._gateway.deliver(
                     kind=REPORT_KIND, period=self._period, body=self._body, lang="th", line=True

@@ -5,6 +5,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+### Changed — M6 social calendar variety
+- The Social agent's calendar now draws from a de-duplicated pool of **distinct
+  real drafts first**, then tops up remaining slots with distinct SEO keyword
+  topics from the latest brief (tagged `(planned topic)`, and skipping any topic
+  a draft already covers). Previously a single draft filled all 12 slots
+  identically. A thin backlog (fewer distinct titles than slots) is now logged
+  (`content_calendar_thin_backlog`) instead of silently repeating. Social gathers
+  recent `seo` briefs alongside `content` drafts to source the topics.
+
+### Fixed — M6 content fallback title
+- The Content agent's deterministic (no-LLM) fallback picked an SEO brief's
+  `Site:` metadata line as the working title, which then propagated into every
+  Social calendar slot. It now extracts the first **target keyword** from the
+  brief (e.g. "Private Pool Villa Koh Samui"), falling back to the top brand
+  theme. Surfaced by a live pipeline run; regression-tested.
+
 ### Added — M6 Marketing (Content & SEO)
 - Three budget-capped agents forming a content pipeline over the `reports`
   table, each additive-LLM with a deterministic fallback (a brief/draft/calendar
