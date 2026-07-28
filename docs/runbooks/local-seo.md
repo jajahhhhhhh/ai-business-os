@@ -7,9 +7,25 @@ organic. This runbook is the do-it-yourself plan; the marketing agents (Social,
 Analytics, Email/LINE) feed and measure it but do not replace the manual
 account setup.
 
-Context: howtoniksen.com starts at Ahrefs Domain Rating **0.0** (measured), so
-organic ranking for head terms is a months-long effort — local/GBP is the near-
-term lever.
+Context: the villa is in **Lamai, Koh Samui**, and howtoniksen.com starts at
+Ahrefs Domain Rating **0.0** (measured), so organic ranking for head terms is a
+months-long effort — local/GBP is the near-term lever.
+
+## Target keywords (Lamai — winnable long-tail)
+
+Scope everything (GBP description, Posts, on-site copy, file names) to **Lamai**,
+not just "Koh Samui" — the locality cuts the competition to terms a DR-0 site
+can actually rank for. These mirror the SEO agent's `KEYWORD_THEMES`:
+
+- **Primary:** `private pool villa lamai koh samui`, `boutique villa lamai beach`
+- **Brand/niche (near-zero competition):** `niksen retreat koh samui`,
+  `digital detox villa koh samui`
+- **Wellness:** `wellness retreat lamai koh samui`
+- **Hyper-local (map-pack targets):** `private pool villa near lamai beach`,
+  `villa lamai koh samui`, `boutique villa near hin ta hin yai`
+
+Head terms like `villa koh samui` are aspirational — chase them later; win Lamai
+first.
 
 ## ⚠️ Eligibility & policy (read first)
 
@@ -40,11 +56,11 @@ location**. Fast ways to get suspended (months of setback):
 Completeness is a direct ranking factor — fill everything, in Thai + English:
 
 - **Description** (~750 chars): brand voice + niksen/slow-living angle, naturally
-  including "private pool villa", "[area] Koh Samui", "quiet retreat". No
+  including "private pool villa", "Lamai, Koh Samui", "quiet retreat". No
   keyword stuffing.
 - **Photos:** 20+ high-quality (pool, bedrooms, view, exterior, neighbourhood);
   add new ones monthly. Name files descriptively before upload
-  (`private-pool-villa-[area]-koh-samui.jpg`).
+  (`private-pool-villa-lamai-koh-samui.jpg`).
 - **Attributes:** Wi-Fi, pool, air-con, parking, pet policy, accessibility — tick
   all that apply.
 - **Booking link** → the direct-booking page (keeps commission off OTAs and
@@ -72,15 +88,16 @@ Pick one canonical NAP format ("Road" vs "Rd.", one phone format) and enforce it
 ## Phase 5 — Ongoing, wired into the OS
 
 - **Google Posts weekly** — fed by the Social agent's content calendar (offers,
-  "things to do near [area]", seasonal availability).
+  "things to do near Lamai" — Hin Ta Hin Yai rocks, Lamai Beach, night market —
+  seasonal availability).
 - **Seed Q&A** on the profile (ask + answer: airport transfer? minimum stay?
   pet-friendly?).
 - **On-site local content + schema:** add a `LodgingBusiness` structured-data
-  block with geo-coordinates to howtoniksen.com; add location pages
-  ("Private pool villa in [area], Koh Samui").
+  block with geo-coordinates to howtoniksen.com; add a location page
+  ("Private pool villa in Lamai, Koh Samui").
 - **Measure monthly** via GBP Insights (Views, Direction requests, Calls,
-  Website clicks) and track the map-pack rank for "villa [area] koh samui" —
-  slots into the Analytics agent's reporting.
+  Website clicks) and track the map-pack rank for "private pool villa lamai koh
+  samui" — slots into the Analytics agent's reporting.
 
 ## First-week checklist
 
@@ -93,6 +110,6 @@ Pick one canonical NAP format ("Road" vs "Rd.", one phone format) and enforce it
 ☐ Confirm identical NAP on TripAdvisor / Agoda / Booking / Airbnb
 ```
 
-**Realistic outcome:** the map pack for hyper-local terms ("villa [area] koh
-samui", "private pool villa near [landmark]") is winnable in **weeks** — well
+**Realistic outcome:** the map pack for hyper-local terms ("villa lamai koh
+samui", "private pool villa near Lamai Beach") is winnable in **weeks** — well
 before organic blue-link rankings move.

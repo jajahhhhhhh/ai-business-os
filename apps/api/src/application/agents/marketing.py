@@ -29,14 +29,17 @@ BRAND_TONE = (
     "sensory and specific, never salesy or superlative-heavy"
 )
 
-# Evergreen keyword themes for a boutique private-pool villa on Koh Samui.
-# The SEO agent seeds its brief from these and layers competitor gaps on top.
+# Keyword themes for the boutique private-pool villa in LAMAI, Koh Samui.
+# Deliberately long-tail + locality-scoped (Lamai / niksen / digital-detox):
+# a Domain-Rating-0 site ranks these winnable terms long before it can touch
+# head terms like "villa koh samui" that the OTAs dominate. The SEO agent seeds
+# its brief from these and layers competitor gaps on top.
 KEYWORD_THEMES: tuple[str, ...] = (
-    "private pool villa koh samui",
-    "boutique villa koh samui",
-    "wellness retreat koh samui",
-    "slow travel koh samui",
-    "quiet luxury villa thailand",
+    "private pool villa lamai koh samui",
+    "boutique villa lamai beach",
+    "niksen retreat koh samui",
+    "digital detox villa koh samui",
+    "wellness retreat lamai koh samui",
 )
 
 # Brand publishing channels (guide metadata). The calendar cadence itself is
