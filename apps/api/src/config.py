@@ -113,6 +113,16 @@ class Settings(BaseSettings):
     reddit_client_id: str = ""
     reddit_client_secret: str = ""
 
+    # M7: property management system (PMS) booking ingestion. Empty provider ->
+    # the booking sync skips cleanly (no credentials). pms_room_count is the
+    # bookable inventory used for occupancy; pms_currency is the reporting
+    # currency (stays in other currencies are skipped in analytics).
+    pms_provider: Literal["", "smoobu", "lodgify"] = ""
+    smoobu_api_key: str = ""
+    lodgify_api_key: str = ""
+    pms_room_count: int = 1
+    pms_currency: str = "THB"
+
     def require(self, name: str) -> str:
         """Return the named setting, raising a clear error if it is empty.
 

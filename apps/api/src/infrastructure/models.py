@@ -422,6 +422,39 @@ class Report(TimestampMixin, Base):
     sent_at: Mapped[datetime | None]
 
 
+# --------------------------------------------------------------------------- bookings
+
+
+class Booking(TimestampMixin, Base):
+    """A PMS reservation ingested for occupancy/pricing analytics (M7).
+
+    No guest PII — dates, amount, status and channel only. Idempotent per
+    (provider, external_id): repeated syncs update in place."""
+
+    __tablename__ = "bookings"
+    __table_args__ = (
+        sa.UniqueConstraint("provider", "external_id", name="uq_bookings_provider_external"),
+        sa.Index("ix_bookings_check_in", "check_in"),
+        sa.Index("ix_bookings_status", "status"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    provider: Mapped[str]  # smoobu|lodgify
+    external_id: Mapped[str]
+    status: Mapped[str] = mapped_column(server_default=sa.text("'booked'"))  # booked|cancelled
+    check_in: Mapped[date]
+    check_out: Mapped[date]
+    nights: Mapped[int]
+    gross_amount: Mapped[Decimal | None]
+    currency: Mapped[str] = mapped_column(server_default=sa.text("'THB'"))
+    channel: Mapped[str | None]
+    property_ref: Mapped[str | None]
+    guests: Mapped[int | None]
+    site_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.ForeignKey("sites.id", ondelete="SET NULL")
+    )
+
+
 # --------------------------------------------------------------------------- audit
 
 

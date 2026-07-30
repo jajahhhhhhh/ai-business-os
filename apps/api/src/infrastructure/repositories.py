@@ -6,13 +6,14 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.application.bank_transactions import MATCHED
+from src.application.bookings import CollectedBooking
 from src.application.errors import NotFoundError
 from src.application.snapshot import SiteSnapshot
 from src.domain.cursor import Cursor
@@ -22,6 +23,7 @@ from src.infrastructure.models import (
     AgentEval,
     AgentRun,
     BankTransaction,
+    Booking,
     ChangeEvent,
     Chunk,
     Competitor,
@@ -1452,3 +1454,51 @@ class LeadMaintenanceSqlRepository:
             )
         )
         await self._session.flush()
+
+
+_BOOKING_CENT = Decimal("0.01")
+
+
+class BookingSqlRepository:
+    """Idempotent upsert of PMS reservations by (provider, external_id)."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def upsert(self, booking: CollectedBooking) -> tuple[bool, bool]:
+        stmt = sa.select(Booking).where(
+            Booking.provider == booking.provider,
+            Booking.external_id == booking.external_id,
+        )
+        existing = (await self._session.execute(stmt)).scalar_one_or_none()
+        nights = max(0, (booking.check_out - booking.check_in).days)
+        amount = (
+            booking.gross_amount.quantize(_BOOKING_CENT, rounding=ROUND_HALF_UP)
+            if booking.gross_amount is not None
+            else None
+        )
+        fields = {
+            "status": booking.status,
+            "check_in": booking.check_in,
+            "check_out": booking.check_out,
+            "nights": nights,
+            "gross_amount": amount,
+            "currency": booking.currency,
+            "channel": booking.channel,
+            "property_ref": booking.property_ref,
+            "guests": booking.guests,
+        }
+        if existing is None:
+            self._session.add(
+                Booking(provider=booking.provider, external_id=booking.external_id, **fields)
+            )
+            await self._session.flush()
+            return True, False
+        changed = False
+        for attr, value in fields.items():
+            if getattr(existing, attr) != value:
+                setattr(existing, attr, value)
+                changed = True
+        if changed:
+            await self._session.flush()
+        return False, changed
