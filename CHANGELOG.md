@@ -5,6 +5,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+### Added — M6 Postiz publishing (content calendar → scheduled posts)
+- A weekly `publish_content_calendar` beat (Fri 09:30) recomputes the Social
+  agent's rolling 4-week schedule, turns each slot into a publish-ready English
+  caption (brand CTA + link + hashtags), and creates scheduled posts on
+  **Postiz**. Config-gated (`POSTIZ_API_URL` / `POSTIZ_API_KEY` /
+  `POSTIZ_CHANNELS_JSON` mapping channels → integration ids) and idempotent via
+  a `published_posts` ledger (Alembic `0008`) so the rolling window never
+  double-posts; slots on unmapped channels are skipped. Skips cleanly when
+  Postiz is unconfigured.
+- **ADR-0010** records this as a deliberate backend re-wrap of the Postiz MCP,
+  deviating from §7 ("MCPs consumed as-is") to enable unattended scheduling.
+
 ### Added — M7 guest comms (post-checkout review requests)
 - A daily 10:00 nudge (`send_review_requests`) scans bookings that checked out
   in the last few days and haven't been nudged, composes one owner-facing LINE

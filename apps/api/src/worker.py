@@ -169,6 +169,12 @@ celery_app.conf.beat_schedule = {
         "task": "src.worker.send_review_requests",
         "schedule": crontab(minute=0, hour=10),
     },
+    # M6: publish the content calendar to Postiz, Fri 09:30 Asia/Bangkok (after
+    # the Thu calendar). Rolling 4-week window; skips cleanly without Postiz.
+    "publish-content-calendar-fri-0930": {
+        "task": "src.worker.publish_content_calendar",
+        "schedule": crontab(minute=30, hour=9, day_of_week="fri"),
+    },
 }
 
 WORKER_ACTOR = "worker"
@@ -628,6 +634,75 @@ async def _send_review_requests() -> dict[str, object]:
         return {"status": "failed", "error": str(exc)[:ERROR_MAX_CHARS]}
     finally:
         await engine.dispose()
+
+
+async def _publish_content_calendar() -> dict[str, object]:
+    """Publish the content calendar's upcoming posts to Postiz; NEVER raises.
+
+    Skips cleanly when Postiz (url/key/channel map) is unconfigured. Recomputes
+    the same rolling 4-week schedule the Social agent renders, so titles/dates
+    match the calendar; the published_posts ledger keeps it idempotent."""
+    settings = get_settings()
+    from src.infrastructure.postiz import build_postiz_publisher
+
+    publisher = build_postiz_publisher(settings)
+    if publisher is None or not settings.postiz_channels:
+        logger.info("publish_content_calendar_skipped", reason="postiz not configured")
+        return {"status": "skipped", "published": 0}
+
+    engine = build_engine(settings.database_url)
+    try:
+        from src.application.agents.marketing import build_title_pool
+        from src.application.agents.ports import ReportRef
+        from src.application.postiz_publish import PostizPublishUseCases, build_post_specs
+        from src.infrastructure.repositories import AgentSqlRepository, PublishedPostSqlRepository
+
+        maker = build_sessionmaker(engine)
+        today = datetime.now(BANGKOK_TZ).date()
+        async with maker() as session:
+            reports = AgentSqlRepository(session)
+            content_rows = await reports.list_reports("content", 12)
+            brief_rows = await reports.list_reports("seo", 1)
+            drafts = [
+                ReportRef(
+                    report_id=row.id,
+                    period=row.period,
+                    body=row.body or "",
+                    created_at=row.created_at,
+                )
+                for row in content_rows
+            ]
+            brief_body = (brief_rows[0].body or "") if brief_rows else ""
+            titles = build_title_pool(drafts, brief_body)
+            specs = build_post_specs(today, titles, today=today)
+            use_cases = PostizPublishUseCases(
+                PublishedPostSqlRepository(session),
+                publisher,
+                SqlAuditWriter(session),
+                channel_map=settings.postiz_channels,
+            )
+            stats = await use_cases.publish(specs, actor=WORKER_ACTOR)
+            await session.commit()
+        logger.info("publish_content_calendar_done", **stats.as_dict())
+        return {"status": "done", **stats.as_dict()}
+    except Exception as exc:  # noqa: BLE001 - publishing must never raise out of a task
+        logger.exception("publish_content_calendar_failed")
+        return {"status": "failed", "error": str(exc)[:ERROR_MAX_CHARS]}
+    finally:
+        aclose = getattr(publisher, "aclose", None)
+        if aclose is not None:
+            await aclose()
+        await engine.dispose()
+
+
+@celery_app.task(name="src.worker.publish_content_calendar", bind=True)
+def publish_content_calendar(self) -> dict[str, object]:  # noqa: ANN001 - celery bind
+    """M6: schedule the content calendar's upcoming posts to Postiz (never raises)."""
+    try:
+        return asyncio.run(_publish_content_calendar())
+    except Exception:  # noqa: BLE001 - defensive: even setup failures stay in-task
+        logger.exception("publish_content_calendar_task_error")
+        return {"status": "failed"}
 
 
 @celery_app.task(name="src.worker.send_review_requests", bind=True)

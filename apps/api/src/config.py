@@ -129,6 +129,18 @@ class Settings(BaseSettings):
     gbp_review_url: str = ""
     review_request_lookback_days: int = 3
 
+    # M6 Postiz publishing (ADR-0010: deliberate backend re-wrap of the Postiz
+    # MCP). Empty url/key -> publishing skips cleanly. postiz_channels maps a
+    # calendar channel name to a connected Postiz integration id; env override
+    # POSTIZ_CHANNELS_JSON, e.g. {"Instagram": "abc", "Facebook": "def"}.
+    # Slots whose channel is unmapped are skipped.
+    postiz_api_url: str = ""
+    postiz_api_key: str = ""
+    postiz_channels: dict[str, str] = Field(
+        default_factory=dict,
+        validation_alias="POSTIZ_CHANNELS_JSON",
+    )
+
     def require(self, name: str) -> str:
         """Return the named setting, raising a clear error if it is empty.
 
