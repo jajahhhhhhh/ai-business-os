@@ -43,6 +43,8 @@ DISPATCHABLE: dict[str, tuple[str, tuple[str, ...]]] = {
     # M7 PMS booking sync + guest-comms review-request nudge.
     "sync_bookings": ("src.worker.sync_bookings", ()),
     "send_review_requests": ("src.worker.send_review_requests", ()),
+    # M6 Postiz publishing.
+    "publish_content_calendar": ("src.worker.publish_content_calendar", ()),
 }
 
 

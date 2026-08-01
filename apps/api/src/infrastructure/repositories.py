@@ -38,6 +38,7 @@ from src.infrastructure.models import (
     LeadScore,
     Memory,
     Milestone,
+    PublishedPost,
     Quotation,
     RawDocument,
     Report,
@@ -1551,5 +1552,29 @@ class BookingSqlRepository:
             return
         await self._session.execute(
             sa.update(Booking).where(Booking.id.in_(booking_ids)).values(review_requested_at=at)
+        )
+        await self._session.flush()
+
+
+class PublishedPostSqlRepository:
+    """Idempotency ledger for Postiz publishing (dedup by dedup_key)."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def exists(self, dedup_key: str) -> bool:
+        stmt = sa.select(PublishedPost.id).where(PublishedPost.dedup_key == dedup_key)
+        return (await self._session.execute(stmt)).first() is not None
+
+    async def record(
+        self, *, dedup_key: str, external_id: str, channel: str, scheduled_for: date
+    ) -> None:
+        self._session.add(
+            PublishedPost(
+                dedup_key=dedup_key,
+                external_id=external_id or None,
+                channel=channel,
+                scheduled_for=scheduled_for,
+            )
         )
         await self._session.flush()

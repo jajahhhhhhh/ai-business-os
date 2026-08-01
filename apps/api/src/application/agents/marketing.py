@@ -257,6 +257,31 @@ def _week_start(reference: date) -> date:
     return reference + timedelta(days=days_ahead)
 
 
+@dataclass(frozen=True, slots=True)
+class DatedSlot:
+    week: int
+    day: str
+    when: date
+    channel: str
+    title: str
+
+
+def dated_slots(reference: date, titles: list[str]) -> list[DatedSlot]:
+    """The scheduled slots with concrete dates — the source both the human
+    calendar and the Postiz publisher read (one place computes the dates)."""
+    start = _week_start(reference)
+    return [
+        DatedSlot(
+            week=slot.week,
+            day=slot.day,
+            when=start + timedelta(days=(slot.week - 1) * 7 + _weekday_offset(slot.day)),
+            channel=slot.channel,
+            title=slot.title,
+        )
+        for slot in schedule_calendar(titles)
+    ]
+
+
 def render_calendar(reference: date, titles: list[str], *, had_drafts: bool) -> tuple[str, str]:
     """Render the Thai 4-week calendar from a prepared title pool.
 
@@ -269,13 +294,25 @@ def render_calendar(reference: date, titles: list[str], *, had_drafts: bool) -> 
     lines = [f"{CALENDAR_HEADER_TH} ({start.isoformat()} – {end.isoformat()})"]
     if not had_drafts:
         lines.append(NO_DRAFTS_LINE_TH)
-    for slot in schedule_calendar(titles):
-        slot_date = start + timedelta(days=(slot.week - 1) * 7 + _weekday_offset(slot.day))
+    for slot in dated_slots(reference, titles):
         lines.append(
-            f"สัปดาห์ {slot.week} · {slot_date.isoformat()} ({slot.day}) · "
+            f"สัปดาห์ {slot.week} · {slot.when.isoformat()} ({slot.day}) · "
             f"{slot.channel}: {slot.title}"
         )
     return "\n".join(lines), period
+
+
+# Post caption for Postiz publishing — English content per §3, on-brand CTA.
+POST_HASHTAGS = "#KohSamui #Lamai #PrivatePoolVilla #Niksen"
+
+
+def post_caption(title: str) -> str:
+    """A publish-ready English caption from a calendar slot's topic title."""
+    clean = title.replace(PLANNED_TOPIC_SUFFIX, "").strip()
+    return (
+        f"{clean} — slow, do-nothing days at {BRAND_NAME}, {BRAND_LOCATION}. 🌿\n"
+        f"Check dates & book direct: {BRAND_SITE}\n{POST_HASHTAGS}"
+    )
 
 
 def compose_content_calendar(

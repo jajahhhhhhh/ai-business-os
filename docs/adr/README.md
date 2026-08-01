@@ -14,3 +14,4 @@ new decisions get the next number. Status: accepted | superseded-by-NNN.
 | [0007](0007-llm-provider-strategy.md) | Claude primary, OpenAI fallback, bge-m3 local embeddings | accepted |
 | [0008](0008-glitchtip-over-sentry.md) | GlitchTip over Sentry SaaS | accepted |
 | [0009](0009-minio-over-cloud-s3.md) | MinIO + off-site B2 backup over cloud S3 | accepted |
+| [0010](0010-postiz-backend-publisher.md) | Postiz as a backend publisher (deviating from §7) | accepted |

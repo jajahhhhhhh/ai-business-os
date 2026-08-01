@@ -458,6 +458,21 @@ class Booking(TimestampMixin, Base):
     review_requested_at: Mapped[datetime | None]
 
 
+class PublishedPost(TimestampMixin, Base):
+    """A calendar slot scheduled to Postiz (M6). dedup_key = date|channel|title
+    keeps the weekly rolling publish idempotent — no double-posting."""
+
+    __tablename__ = "published_posts"
+    __table_args__ = (sa.UniqueConstraint("dedup_key", name="uq_published_posts_dedup_key"),)
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    dedup_key: Mapped[str]
+    provider: Mapped[str] = mapped_column(server_default=sa.text("'postiz'"))
+    external_id: Mapped[str | None]
+    channel: Mapped[str]
+    scheduled_for: Mapped[date]
+
+
 # --------------------------------------------------------------------------- audit
 
 
