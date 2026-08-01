@@ -40,6 +40,8 @@ DISPATCHABLE: dict[str, tuple[str, tuple[str, ...]]] = {
     "seo_brief": ("src.worker.run_agent_task", ("seo", "seo-brief")),
     "content_draft": ("src.worker.run_agent_task", ("content", "content-draft")),
     "content_calendar": ("src.worker.run_agent_task", ("social", "content-calendar")),
+    # M7 PMS booking sync.
+    "sync_bookings": ("src.worker.sync_bookings", ()),
 }
 
 

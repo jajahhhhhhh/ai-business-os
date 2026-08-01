@@ -5,6 +5,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+### Added — M7 Operations (PMS bookings + occupancy analytics)
+- Connect a property-management system (**Smoobu** or **Lodgify**) to ingest
+  reservations for occupancy/pricing analytics. Provider-agnostic: pure
+  `parse_smoobu`/`parse_lodgify` normalize payloads (no guest PII — dates,
+  amount, status, channel only) into a `bookings` table via an idempotent
+  upsert keyed on `(provider, external_id)`; `build_booking_collector` is
+  config-gated and the daily `sync_bookings` beat skips cleanly when the PMS is
+  unconfigured (Gmail/Reddit pattern).
+- Pure `domain/revenue.occupancy_summary` computes **occupancy %, ADR, RevPAR**
+  over a date window for N rooms — straddling stays clipped + revenue pro-rated,
+  cancellations excluded, single-currency (others skipped and counted), exact
+  `Decimal`. New Alembic migration `0006_bookings`. Runbook:
+  `docs/runbooks/pms-bookings.md`. (Phase 2 wires the metrics into the weekly
+  report + dashboard.)
+
+### Changed — M6 keyword targeting (Lamai)
+- Sharpened the SEO agent's `KEYWORD_THEMES` from generic "koh samui" head terms
+  to winnable **Lamai** long-tail (`private pool villa lamai koh samui`,
+  `boutique villa lamai beach`, `niksen retreat koh samui`, `digital detox villa
+  koh samui`, `wellness retreat lamai koh samui`) — a Domain-Rating-0 site ranks
+  these before OTA-dominated head terms. Flows through the SEO brief, content
+  title, and the calendar's planned topics. The local-SEO runbook is scoped to
+  Lamai to match (description, Posts, file names, map-pack targets).
+
 ### Changed — M6 social calendar variety
 - The Social agent's calendar now draws from a de-duplicated pool of **distinct
   real drafts first**, then tops up remaining slots with distinct SEO keyword

@@ -155,6 +155,12 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(minute=0, hour=9, day_of_week="thu"),
         "args": ("social", "content-calendar"),
     },
+    # M7: PMS booking sync daily 05:00 Asia/Bangkok (skips cleanly when the PMS
+    # is unconfigured).
+    "sync-bookings-0500": {
+        "task": "src.worker.sync_bookings",
+        "schedule": crontab(minute=0, hour=5),
+    },
 }
 
 WORKER_ACTOR = "worker"
@@ -518,6 +524,56 @@ def collect_all_lead_sources(self) -> dict[str, object]:  # noqa: ANN001 - celer
     except Exception:  # noqa: BLE001 - defensive: even setup failures stay in-task
         logger.exception("collect_all_lead_sources_task_error")
         return {"status": "failed"}
+
+
+# ------------------------------------------------------------- M7: PMS bookings
+
+
+async def _sync_bookings() -> dict[str, object]:
+    """Pull PMS reservations into the bookings table; NEVER raises.
+
+    Builds the configured booking collector lazily (Smoobu/Lodgify); when the
+    PMS is unconfigured the collector is None and we skip cleanly."""
+    settings = get_settings()
+    from src.infrastructure.pms import build_booking_collector
+
+    collector = build_booking_collector(settings)
+    if collector is None:
+        logger.info("sync_bookings_skipped", reason="pms not configured")
+        return {"status": "skipped", "fetched": 0}
+
+    engine = build_engine(settings.database_url)
+    try:
+        from src.application.bookings import BookingIngestionUseCases
+        from src.infrastructure.repositories import BookingSqlRepository
+
+        maker = build_sessionmaker(engine)
+        async with maker() as session:
+            use_cases = BookingIngestionUseCases(
+                BookingSqlRepository(session), SqlAuditWriter(session)
+            )
+            stats = await use_cases.sync(collector, actor=WORKER_ACTOR)
+            await session.commit()
+        logger.info("sync_bookings_done", **stats.as_dict())
+        return {"status": "done", **stats.as_dict()}
+    except Exception as exc:  # noqa: BLE001 - sync must never raise out of a task
+        logger.exception("sync_bookings_failed")
+        return {"status": "failed", "error": str(exc)[:ERROR_MAX_CHARS]}
+    finally:
+        aclose = getattr(collector, "aclose", None)
+        if aclose is not None:
+            await aclose()
+        await engine.dispose()
+
+
+@celery_app.task(name="src.worker.sync_bookings", bind=True, max_retries=3)
+def sync_bookings(self) -> dict[str, object]:  # noqa: ANN001 - celery bind
+    """M7: daily PMS reservation sync. Transient HTTP/DB failures retry with
+    backoff; _sync_bookings itself never raises (skip/failed status)."""
+    try:
+        return asyncio.run(_sync_bookings())
+    except Exception as exc:  # network/DB blips retry
+        raise self.retry(exc=exc, countdown=60 * (2**self.request.retries)) from exc
 
 
 @celery_app.task(name="src.worker.cluster_leads", bind=True)
