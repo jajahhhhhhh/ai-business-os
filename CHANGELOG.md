@@ -5,6 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+### Added — M7 Phase 2 (occupancy surfaced in report + dashboard)
+- `GET /v1/bookings/occupancy?days=30` returns occupancy %, ADR, RevPAR over a
+  trailing window (`BookingAnalyticsUseCases` over the pure revenue engine +
+  `BookingSqlRepository.stays_in_window`), and a dashboard tile renders it
+  ("อัตราการเข้าพัก 30 วัน" with ADR/RevPAR), degrading to "เชื่อม PMS" when there
+  are no bookings.
+- The weekly Analytics report now appends a Thai occupancy section
+  (`format_occupancy_th`) when booking data exists — additive and never
+  load-bearing (a bookings/PMS error leaves the report untouched).
+
 ### Added — M7 Operations (PMS bookings + occupancy analytics)
 - Connect a property-management system (**Smoobu** or **Lodgify**) to ingest
   reservations for occupancy/pricing analytics. Provider-agnostic: pure

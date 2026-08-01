@@ -65,12 +65,14 @@ from src.application.agents.qa import QaAgent
 from src.application.agents.seo import SeoAgent
 from src.application.agents.social import SocialAgent
 from src.application.bank_transactions import MATCHED
+from src.application.booking_analytics import BookingAnalyticsUseCases
 from src.application.competitor_intel import CompetitorIntelUseCases
 from src.application.lead_discovery import DiscoveryStats, LeadDiscoveryUseCases
 from src.application.memory import MemoryUseCases
 from src.application.snapshot import DailySnapshotUseCases
 from src.config import Settings
 from src.domain.bank_alerts import BANGKOK_TZ
+from src.domain.revenue import format_occupancy_th
 from src.infrastructure.adapters import (
     CompetitorAdapters,
     KbAdapters,
@@ -96,6 +98,7 @@ from src.infrastructure.models import (
 )
 from src.infrastructure.pii import PiiCipher
 from src.infrastructure.repositories import (
+    BookingSqlRepository,
     CompetitorIntelSqlRepository,
     LeadDiscoverySqlRepository,
     MemorySqlRepository,
@@ -356,11 +359,13 @@ class AnalyticsSqlGateway:
         adapters: CompetitorAdapters,
         line_push: Any | None,
         actor: str,
+        settings: Settings,
     ) -> None:
         self._maker = maker
         self._adapters = adapters
         self._line_push = line_push
         self._actor = actor
+        self._settings = settings
         self._weekly_events = 0
 
     def _weekly_use_cases(self, session: AsyncSession) -> CompetitorIntelUseCases:
@@ -385,7 +390,30 @@ class AnalyticsSqlGateway:
         async with self._maker() as session:
             draft, period, events = await self._weekly_use_cases(session).compose_weekly_draft()
         self._weekly_events = events
-        return ComposedReport(body=draft, period=period)
+        body = await self._with_occupancy(draft)
+        return ComposedReport(body=body, period=period)
+
+    async def _with_occupancy(self, draft: str) -> str:
+        """Append the M7 occupancy section to the weekly draft when there is
+        booking data (PMS configured + reservations in the last 30 days);
+        never raises — a bookings/PMS problem must not break the weekly report."""
+        try:
+            today = datetime.now(BANGKOK_TZ).date()
+            async with self._maker() as session:
+                summary = await BookingAnalyticsUseCases(
+                    BookingSqlRepository(session)
+                ).occupancy_last_days(
+                    30,
+                    today=today,
+                    units=self._settings.pms_room_count,
+                    currency=self._settings.pms_currency,
+                )
+        except Exception:  # noqa: BLE001 - occupancy is additive; draft survives
+            logger.exception("weekly_occupancy_failed")
+            return draft
+        if summary.nights_sold == 0 and summary.gross_revenue == 0:
+            return draft  # no bookings (or PMS unconfigured) — nothing to add
+        return f"{draft}\n\n{format_occupancy_th(summary)}"
 
     async def upgrade_weekly(self, draft: str) -> str:
         try:
@@ -837,6 +865,7 @@ def build_agent(
             adapters=competitor_adapters,
             line_push=runtime.line_push,
             actor=actor,
+            settings=settings,
         )
         return AnalyticsAgent(gateway, runtime.llm, daily_budget_usd=cap)
     if agent_name == "memory":

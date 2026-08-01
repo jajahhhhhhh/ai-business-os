@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { AlertTriangle, Banknote, Landmark, Radar, UserPlus, Wallet } from "lucide-react";
+import { AlertTriangle, Banknote, BedDouble, Landmark, Radar, UserPlus, Wallet } from "lucide-react";
 import { BarList } from "@/components/BarList";
 import { Donut } from "@/components/Donut";
 import { EmptyState } from "@/components/EmptyState";
@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/Badge";
 import type { BadgeVariant } from "@/components/ui/Badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/Card";
 import {
+  getOccupancy,
   getSiteSummary,
   listAgentRuns,
   listBankTransactions,
@@ -63,13 +64,15 @@ function sevenDaysAgoIso(): string {
 }
 
 export default async function OverviewPage() {
-  const [sites, leadsPage, runsPage, changeEvents, matchedTransactions] = await Promise.all([
-    safe(listSites()),
-    safe(listLeads()),
-    safe(listAgentRuns()),
-    safe(listCompetitorChanges({ since: sevenDaysAgoIso(), limit: 50 })),
-    safe(listBankTransactions({ status: "matched" })),
-  ]);
+  const [sites, leadsPage, runsPage, changeEvents, matchedTransactions, occupancy] =
+    await Promise.all([
+      safe(listSites()),
+      safe(listLeads()),
+      safe(listAgentRuns()),
+      safe(listCompetitorChanges({ since: sevenDaysAgoIso(), limit: 50 })),
+      safe(listBankTransactions({ status: "matched" })),
+      safe(getOccupancy(30)),
+    ]);
 
   // API fully unreachable → graceful fallback, never a crash.
   if (!sites && !leadsPage && !runsPage && !changeEvents) {
@@ -189,6 +192,16 @@ export default async function OverviewPage() {
             hint="ล้มเหลว · พักไว้ · เกินงบ"
           />
         </Link>
+        <StatCard
+          title="อัตราการเข้าพัก 30 วัน"
+          value={occupancy ? `${occupancy.occupancy_pct}%` : "—"}
+          icon={BedDouble}
+          hint={
+            occupancy && occupancy.nights_sold > 0
+              ? `ADR ${formatTHBCompact(occupancy.adr)} · RevPAR ${formatTHBCompact(occupancy.revpar)}`
+              : "ยังไม่มีข้อมูลการจอง — เชื่อม PMS"
+          }
+        />
       </div>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-3">

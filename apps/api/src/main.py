@@ -21,6 +21,7 @@ from src.interfaces.middleware import RequestContextMiddleware
 from src.interfaces.problems import register_exception_handlers
 from src.interfaces.routers import (
     agents,
+    bookings,
     competitors,
     health,
     jobs,
@@ -105,6 +106,7 @@ def create_app(
     app.include_router(sources.router, prefix="/v1", dependencies=auth)
     app.include_router(agents.router, prefix="/v1", dependencies=auth)
     app.include_router(reports.router, prefix="/v1", dependencies=auth)
+    app.include_router(bookings.router, prefix="/v1", dependencies=auth)
     app.include_router(jobs.router, prefix="/v1", dependencies=auth)
     app.include_router(kb.router, prefix="/v1", dependencies=auth)
     app.include_router(memory.router, prefix="/v1", dependencies=auth)

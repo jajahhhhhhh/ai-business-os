@@ -16,6 +16,8 @@ from src.domain.leads import LeadStage
 # the database preserves exact numeric(14,2) values.
 THB = Annotated[Decimal, PlainSerializer(float, return_type=float, when_used="json")]
 USD = Annotated[Decimal, PlainSerializer(float, return_type=float, when_used="json")]
+# Non-money Decimals (e.g. occupancy %) that the dashboard also plots.
+NUMBER = Annotated[Decimal, PlainSerializer(float, return_type=float, when_used="json")]
 
 
 class ORMModel(BaseModel):
@@ -554,6 +556,21 @@ class SnapshotReportOut(BaseModel):
     body: str
     line_sent: bool
     created_at: datetime
+
+
+class OccupancyOut(BaseModel):
+    """M7 occupancy/pricing metrics over a trailing window (dashboard tile)."""
+
+    window_start: date
+    window_end: date
+    currency: str
+    units: int
+    available_nights: int
+    nights_sold: int
+    gross_revenue: THB
+    occupancy_pct: NUMBER  # 0–100
+    adr: THB
+    revpar: THB
 
 
 class JobOut(ORMModel):

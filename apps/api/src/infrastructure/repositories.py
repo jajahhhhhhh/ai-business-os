@@ -19,6 +19,7 @@ from src.application.snapshot import SiteSnapshot
 from src.domain.cursor import Cursor
 from src.domain.draws import DrawStatus
 from src.domain.leads import LeadStage
+from src.domain.revenue import Stay
 from src.infrastructure.models import (
     AgentEval,
     AgentRun,
@@ -1502,3 +1503,23 @@ class BookingSqlRepository:
         if changed:
             await self._session.flush()
         return False, changed
+
+    async def stays_in_window(self, window_start: date, window_end: date) -> list[Stay]:
+        """Bookings overlapping [window_start, window_end) as analytics Stays.
+
+        Overlap = check_in < window_end AND check_out > window_start; the
+        revenue analytics clip each stay to its in-window nights."""
+        stmt = sa.select(Booking).where(
+            Booking.check_in < window_end, Booking.check_out > window_start
+        )
+        rows = (await self._session.execute(stmt)).scalars().all()
+        return [
+            Stay(
+                check_in=row.check_in,
+                check_out=row.check_out,
+                gross_amount=row.gross_amount,
+                currency=row.currency,
+                status=row.status,
+            )
+            for row in rows
+        ]

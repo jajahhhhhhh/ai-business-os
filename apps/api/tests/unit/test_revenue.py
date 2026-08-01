@@ -7,7 +7,13 @@ from decimal import Decimal
 
 import pytest
 
-from src.domain.revenue import STATUS_CANCELLED, Stay, occupancy_summary
+from src.domain.revenue import (
+    OCCUPANCY_HEADER_TH,
+    STATUS_CANCELLED,
+    Stay,
+    format_occupancy_th,
+    occupancy_summary,
+)
 
 W1 = date(2026, 8, 1)
 W2 = date(2026, 8, 31)  # 30-night window [W1, W2)
@@ -93,3 +99,14 @@ def test_invalid_window_and_units_raise() -> None:
         occupancy_summary([], window_start=W2, window_end=W1)
     with pytest.raises(ValueError):
         occupancy_summary([], window_start=W1, window_end=W2, units=0)
+
+
+def test_format_occupancy_th_has_header_and_metrics() -> None:
+    summary = occupancy_summary(
+        [_stay("2026-08-10", "2026-08-14", "400")], window_start=W1, window_end=W2
+    )
+    text = format_occupancy_th(summary)
+    assert OCCUPANCY_HEADER_TH in text
+    assert "13.3%" in text
+    assert "ADR: 100.00 THB" in text
+    assert "RevPAR: 13.33 THB" in text
