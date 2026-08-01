@@ -123,6 +123,12 @@ class Settings(BaseSettings):
     pms_room_count: int = 1
     pms_currency: str = "THB"
 
+    # M7 guest comms: the Google Business Profile review short-link. Empty ->
+    # the post-checkout review-request nudge is skipped. Lookback bounds how far
+    # back checkouts are picked up (so unsent ones age out rather than pile up).
+    gbp_review_url: str = ""
+    review_request_lookback_days: int = 3
+
     def require(self, name: str) -> str:
         """Return the named setting, raising a clear error if it is empty.
 

@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.application.bank_transactions import MATCHED
 from src.application.bookings import CollectedBooking
 from src.application.errors import NotFoundError
+from src.application.guest_comms import CheckoutRow
 from src.application.snapshot import SiteSnapshot
 from src.domain.cursor import Cursor
 from src.domain.draws import DrawStatus
@@ -1523,3 +1524,32 @@ class BookingSqlRepository:
             )
             for row in rows
         ]
+
+    async def checkouts_awaiting_review(
+        self, window_start: date, window_end: date
+    ) -> list[CheckoutRow]:
+        stmt = sa.select(Booking).where(
+            Booking.status == "booked",
+            Booking.review_requested_at.is_(None),
+            Booking.check_out >= window_start,
+            Booking.check_out < window_end,
+        )
+        rows = (await self._session.execute(stmt)).scalars().all()
+        return [
+            CheckoutRow(
+                booking_id=row.id,
+                property_ref=row.property_ref,
+                check_out=row.check_out,
+                channel=row.channel,
+                nights=row.nights,
+            )
+            for row in rows
+        ]
+
+    async def mark_review_requested(self, booking_ids: list[uuid.UUID], at: datetime) -> None:
+        if not booking_ids:
+            return
+        await self._session.execute(
+            sa.update(Booking).where(Booking.id.in_(booking_ids)).values(review_requested_at=at)
+        )
+        await self._session.flush()

@@ -5,6 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+### Added — M7 guest comms (post-checkout review requests)
+- A daily 10:00 nudge (`send_review_requests`) scans bookings that checked out
+  in the last few days and haven't been nudged, composes one owner-facing LINE
+  message — who checked out + a ready-to-send Google review request (EN + TH)
+  with `GBP_REVIEW_URL` — and marks them **only on successful delivery** so each
+  booking is nudged at most once and a LINE outage simply retries. No guest PII:
+  the copy is owner-forwarded through the channel that already holds the guest.
+  Skips cleanly without LINE / review URL. New column `bookings.review_requested_at`
+  (Alembic `0007`); pure `domain.guest_comms.compose_review_request`.
+
 ### Added — M7 Phase 2 (occupancy surfaced in report + dashboard)
 - `GET /v1/bookings/occupancy?days=30` returns occupancy %, ADR, RevPAR over a
   trailing window (`BookingAnalyticsUseCases` over the pure revenue engine +

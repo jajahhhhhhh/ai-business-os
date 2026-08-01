@@ -453,6 +453,9 @@ class Booking(TimestampMixin, Base):
     site_id: Mapped[uuid.UUID | None] = mapped_column(
         sa.ForeignKey("sites.id", ondelete="SET NULL")
     )
+    # M7 guest comms: set once the post-checkout review request has been sent
+    # (idempotency — a booking is nudged at most once).
+    review_requested_at: Mapped[datetime | None]
 
 
 # --------------------------------------------------------------------------- audit
