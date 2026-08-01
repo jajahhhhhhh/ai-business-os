@@ -64,6 +64,25 @@ revenue is pro-rated; cancelled stays are excluded. All amounts are exact
 Field mappings follow the documented APIs — validate against a live account
 before the first production sync.
 
+## Guest comms — post-checkout review requests (M7)
+
+Once bookings are syncing, the OS can nudge you to collect Google reviews — the
+biggest local-SEO lever (see `local-seo.md`). A daily 10:00 task
+(`send_review_requests`) finds guests who checked out in the last few days,
+sends **one LINE message to you** listing them plus a ready-to-send review
+request (EN + TH) carrying your review link, and marks each booking so it's
+nudged once. No guest PII is stored — you forward the copy through the channel
+that already holds the guest (PMS thread, chat).
+
+Enable it in `infra/compose/.env` (needs LINE configured too):
+
+```
+GBP_REVIEW_URL=https://g.page/r/xxxxxxxx/review   # your Google review short-link
+REVIEW_REQUEST_LOOKBACK_DAYS=3
+```
+
+Empty `GBP_REVIEW_URL` (or unconfigured LINE) → the nudge skips cleanly.
+
 ## Scope / next phase
 
 This milestone lands ingestion + the analytics engine. **Phase 2** wires the

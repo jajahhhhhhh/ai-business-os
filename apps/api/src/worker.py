@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import structlog
 from celery import Celery
@@ -51,6 +52,7 @@ from src.application.errors import UnrecognizedBankAlertError
 from src.application.kb import ERROR_MAX_CHARS, KnowledgeBaseUseCases
 from src.application.renovation import RenovationUseCases
 from src.config import get_settings
+from src.domain.bank_alerts import BANGKOK_TZ
 from src.infrastructure.adapters import (
     CompetitorAdapters,
     KbAdapters,
@@ -160,6 +162,12 @@ celery_app.conf.beat_schedule = {
     "sync-bookings-0500": {
         "task": "src.worker.sync_bookings",
         "schedule": crontab(minute=0, hour=5),
+    },
+    # M7 guest comms: post-checkout review-request nudge daily 10:00 Asia/Bangkok
+    # (after the morning's booking sync; skips cleanly without LINE / review URL).
+    "review-requests-1000": {
+        "task": "src.worker.send_review_requests",
+        "schedule": crontab(minute=0, hour=10),
     },
 }
 
@@ -564,6 +572,72 @@ async def _sync_bookings() -> dict[str, object]:
         if aclose is not None:
             await aclose()
         await engine.dispose()
+
+
+class _LineNotifier:
+    """Notifier over LineClient.push_text (best-effort; returns delivery bool)."""
+
+    def __init__(self, line: LineClient) -> None:
+        self._line = line
+
+    async def push(self, text: str) -> bool:
+        return await self._line.push_text(text)
+
+
+async def _send_review_requests() -> dict[str, object]:
+    """Send the post-checkout review-request nudge; NEVER raises.
+
+    Skips cleanly when LINE or the review URL is unconfigured (nothing to send)."""
+    settings = get_settings()
+    line = LineClient(settings.line_channel_access_token, settings.line_owner_user_id)
+    if not line.is_configured or not settings.gbp_review_url:
+        logger.info(
+            "send_review_requests_skipped",
+            reason="line or review url not configured",
+        )
+        return {"status": "skipped", "due": 0}
+
+    engine = build_engine(settings.database_url)
+    try:
+        from src.application.agents.marketing import BRAND_NAME
+        from src.application.guest_comms import GuestCommsUseCases
+        from src.infrastructure.repositories import BookingSqlRepository
+
+        maker = build_sessionmaker(engine)
+        today = datetime.now(BANGKOK_TZ).date()
+        window_start = today - timedelta(days=settings.review_request_lookback_days)
+        async with maker() as session:
+            use_cases = GuestCommsUseCases(
+                BookingSqlRepository(session),
+                _LineNotifier(line),
+                SqlAuditWriter(session),
+                brand=BRAND_NAME,
+                review_url=settings.gbp_review_url,
+            )
+            stats = await use_cases.send_review_requests(
+                window_start=window_start,
+                window_end=today,
+                now=datetime.now(UTC),
+                actor=WORKER_ACTOR,
+            )
+            await session.commit()
+        logger.info("send_review_requests_done", **stats.as_dict())
+        return {"status": "done", **stats.as_dict()}
+    except Exception as exc:  # noqa: BLE001 - guest comms must never raise out of a task
+        logger.exception("send_review_requests_failed")
+        return {"status": "failed", "error": str(exc)[:ERROR_MAX_CHARS]}
+    finally:
+        await engine.dispose()
+
+
+@celery_app.task(name="src.worker.send_review_requests", bind=True)
+def send_review_requests(self) -> dict[str, object]:  # noqa: ANN001 - celery bind
+    """M7 guest comms: daily post-checkout review-request nudge (never raises)."""
+    try:
+        return asyncio.run(_send_review_requests())
+    except Exception:  # noqa: BLE001 - defensive: even setup failures stay in-task
+        logger.exception("send_review_requests_task_error")
+        return {"status": "failed"}
 
 
 @celery_app.task(name="src.worker.sync_bookings", bind=True, max_retries=3)
