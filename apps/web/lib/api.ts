@@ -50,6 +50,7 @@ import type {
   Milestone,
   MilestoneCreate,
   MilestonePatch,
+  Occupancy,
   Paginated,
   Quotation,
   QuotationCreate,
@@ -241,6 +242,11 @@ export function listSites(): Promise<Site[]> {
 
 export function getSiteSummary(siteId: string): Promise<SiteSummary> {
   return get<SiteSummary>(`/renovation/sites/${encodeURIComponent(siteId)}/summary`);
+}
+
+/** Occupancy/ADR/RevPAR over the trailing `days`-day window (M7). */
+export function getOccupancy(days = 30): Promise<Occupancy> {
+  return get<Occupancy>("/bookings/occupancy", { days });
 }
 
 export function listLeads(params: LeadListParams = {}): Promise<Paginated<Lead>> {

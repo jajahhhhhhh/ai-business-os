@@ -609,6 +609,20 @@ export interface Report {
   body?: string | null;
 }
 
+/** GET /v1/bookings/occupancy — occupancy/pricing metrics over a window (M7). */
+export interface Occupancy {
+  window_start: string;
+  window_end: string;
+  currency: string;
+  units: number;
+  available_nights: number;
+  nights_sold: number;
+  gross_revenue: number;
+  occupancy_pct: number;
+  adr: number;
+  revpar: number;
+}
+
 export interface ReportListParams {
   kind?: ReportKind;
 }

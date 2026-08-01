@@ -123,3 +123,20 @@ def occupancy_summary(
         revpar=revpar,
         skipped_other_currency=skipped,
     )
+
+
+OCCUPANCY_HEADER_TH = "ผลประกอบการเข้าพัก"
+
+
+def format_occupancy_th(summary: OccupancySummary) -> str:
+    """LINE-friendly Thai occupancy block for the weekly report (content in the
+    reporting currency; numbers are the owner-facing metrics)."""
+    return (
+        f"{OCCUPANCY_HEADER_TH} ({summary.window_start.isoformat()} – "
+        f"{summary.window_end.isoformat()})\n"
+        f"- อัตราการเข้าพัก: {summary.occupancy_pct}% "
+        f"({summary.nights_sold}/{summary.available_nights} คืน)\n"
+        f"- ADR: {summary.adr} {summary.currency} · "
+        f"RevPAR: {summary.revpar} {summary.currency}\n"
+        f"- รายได้รวม: {summary.gross_revenue} {summary.currency}"
+    )
