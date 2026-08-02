@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+### Security — web image CVE scan (Trivy `images` gate)
+- Cleared the 6 HIGH advisories Trivy flagged in the `aibos-web` image's bundled
+  Next.js standalone deps (the push-to-main `images` job had been red since M6):
+  `next` → 15.5.22 (CVE-2026-64641/64645/64649), and npm `overrides` forcing
+  `postcss` → 8.5.25 (CVE-2026-45623, GHSA-r28c-9q8g-f849) and `sharp` → 0.35.3
+  (GHSA-f88m-g3jw-g9cj) everywhere, collapsing Next's nested `postcss` 8.4.31.
+  The Alpine OS layer was already clean. Verified: lint + `tsc` + production
+  build pass on the bumped deps.
+
 ### Added — M6 Postiz publishing (content calendar → scheduled posts)
 - A weekly `publish_content_calendar` beat (Fri 09:30) recomputes the Social
   agent's rolling 4-week schedule, turns each slot into a publish-ready English
