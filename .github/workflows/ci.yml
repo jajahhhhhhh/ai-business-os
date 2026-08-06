@@ -15,6 +15,27 @@ jobs:
     strategy:
       matrix:
         package: [apps/api, services/orchestrator, services/collectors]
+    # No service containers here: lint + unit tests need no database, and
+    # attaching postgres to every matrix leg only added a flaky
+    # "Initialize containers" step that could sink the whole job — and with
+    # it skip the downstream `images` security scan. Postgres-backed tests
+    # live in the isolated `integration` job below.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - name: Lint
+        working-directory: ${{ matrix.package }}
+        run: |
+          uv run --group dev ruff check src tests
+          uv run --group dev ruff format --check src tests
+      - name: Unit tests
+        working-directory: ${{ matrix.package }}
+        run: uv run --group dev pytest tests -q -m "not integration"
+
+  integration:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: ${{ github.workspace }}/services/orchestrator/src:${{ github.workspace }}/services/collectors/src
     services:
       postgres:
         image: postgres:16-alpine
@@ -29,17 +50,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v4
-      - name: Lint
-        working-directory: ${{ matrix.package }}
-        run: |
-          uv run --group dev ruff check src tests
-          uv run --group dev ruff format --check src tests
-      - name: Unit tests
-        working-directory: ${{ matrix.package }}
-        run: uv run --group dev pytest tests -q -m "not integration"
       - name: Integration tests
-        if: matrix.package == 'apps/api'
-        working-directory: ${{ matrix.package }}
+        working-directory: apps/api
         env:
           DATABASE_URL: postgresql+asyncpg://osuser:ospass@localhost:5432/aibos_test
         run: uv run --group dev pytest tests/integration -q
